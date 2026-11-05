@@ -1,0 +1,27 @@
+name: Build DeepFit
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: xmake-io/github-action-setup-xmake@v1
+        with:
+          xmake-version: latest
+      - name: Configure
+        run: xmake f -y -m releasedbg
+      - name: Build
+        run: xmake build -y -v
+      - name: Collect
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path out/SKSE/Plugins | Out-Null
+          Get-ChildItem -Recurse build -Include DeepFit.dll,DeepFit.pdb | Copy-Item -Destination out/SKSE/Plugins
+          Copy-Item mod/SKSE/Plugins/DeepFit.ini out/SKSE/Plugins/
+          Get-ChildItem -Recurse out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DeepFit
+          path: out/
