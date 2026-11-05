@@ -64,6 +64,7 @@ namespace
 		DrivenBone            bones[kNumSpecs];
 		int                   found = 0;
 		bool                  checked = false;
+		float                 retry = 0.0f;  // seconds until we look for the mouth bones again
 	};
 
 	struct ShaftVert
@@ -164,7 +165,7 @@ namespace
 
 	// ------------------------------------------------------------------ receiver cache
 
-	Receiver* getReceiver(Actor* actor)
+	Receiver* getReceiver(Actor* actor, float delta)
 	{
 		auto* root = actor->Get3D(false);
 		if (!root)
@@ -172,16 +173,24 @@ namespace
 		auto& r = g_receivers[actor->GetFormID()];
 		if (r.root == root && r.found > 0)
 			return &r;
-		if (r.root == root && r.found == 0 && r.checked)
-			return nullptr;
+		if (r.root == root && r.found == 0 && r.checked) {
+			// the facegen head attaches a little after the body 3D: keep looking every 2 s
+			r.retry -= delta;
+			if (r.retry > 0.0f)
+				return nullptr;
+		}
 
 		// (re)build
 		r = Receiver{};
 		r.root = root;
 		r.checked = true;
+		r.retry = 2.0f;
 		auto headObj = root->GetObjectByName("NPC Head [Head]");
-		if (!headObj)
+		if (!headObj) {
+			if (Config::get().debugLog && actor->IsPlayerRef())
+				logs::info("DeepFit: player 3D has no 'NPC Head [Head]' node yet");
 			return nullptr;
+		}
 		r.head = NiPointer<NiAVObject>(headObj);
 		traverse(root, [&](NiAVObject* o) {
 			int i = matchSpec(o->name.c_str());
@@ -198,6 +207,8 @@ namespace
 			++r.found;
 		});
 		if (r.found == 0 || !r.bones[kUpperCenter].valid || !r.bones[kBottomCenter].valid) {
+			if (Config::get().debugLog && actor->IsPlayerRef())
+				logs::info("DeepFit: player head found but only {} mouth bones matched (need Upper/Bottom Lip Center)", r.found);
 			r.found = 0;
 			return nullptr;
 		}
@@ -505,10 +516,12 @@ void DeepFit::OnFrame(float delta)
 	for (auto& [id, p] : g_partners)
 		p.skinnedThisFrame = false;
 
+	int nRecv = 0, nShaft = 0;
 	for (auto* recv : actors) {
-		auto* r = getReceiver(recv);
+		auto* r = getReceiver(recv, delta);
 		if (!r)
 			continue;
+		++nRecv;
 		const NiPoint3 headPos = r->head->world.translate;
 
 		std::vector<NiPoint3> shaft;
@@ -524,10 +537,17 @@ void DeepFit::OnFrame(float delta)
 			skinPartner(*p);
 			shaft.insert(shaft.end(), p->world.begin(), p->world.end());
 		}
+		nShaft += static_cast<int>(shaft.size());
 		if (shaft.empty())
 			relax(*r, delta);
 		else
 			solve(*r, shaft, delta);
+	}
+	static float heartbeat = 0.0f;
+	heartbeat += delta;
+	if (cfg.debugLog && heartbeat > 5.0f) {
+		heartbeat = 0.0f;
+		logs::info("DeepFit: alive - {} actors, {} with mouth bones, {} shaft verts in range", actors.size(), nRecv, nShaft);
 	}
 	if (g_logTimer > 1.0f)
 		g_logTimer = 0.0f;
