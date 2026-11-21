@@ -20,8 +20,13 @@ namespace
 
 	void MessageHandler(SKSE::MessagingInterface::Message* a_msg)
 	{
-		if (a_msg && a_msg->type == SKSE::MessagingInterface::kDataLoaded) {
+		if (!a_msg)
+			return;
+		if (a_msg->type == SKSE::MessagingInterface::kInputLoaded)
+			DeepFit::Install();
+		if (a_msg->type == SKSE::MessagingInterface::kDataLoaded) {
 			Config::get().load();
+			DeepFit::Install();
 		}
 	}
 }
@@ -30,10 +35,9 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 {
 	SKSE::Init(a_skse);
 	SetupLog();
-	logs::info("DeepFit 0.1.1 loading");
+	logs::info("DeepFit 0.1.2 loading");
 	Config::get().load();
 	if (auto* msg = SKSE::GetMessagingInterface())
 		msg->RegisterListener(MessageHandler);
-	DeepFit::Install();
 	return true;
 }

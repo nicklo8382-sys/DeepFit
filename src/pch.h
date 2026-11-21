@@ -1,6 +1,7 @@
 #pragma once
 #include <RE/Skyrim.h>
 #include <SKSE/SKSE.h>
+#include <atomic>
 #include <cmath>
 #include <cstring>
 #include <string>

@@ -87,6 +87,8 @@ namespace
 		float                   age = 0.0f;  // seconds since built
 		std::vector<NiPoint3>   world;       // skinned this frame
 		bool                    skinnedThisFrame = false;
+		int                     looked = 0, genital = 0;  // last scan, for the log
+		bool                    told = false;
 	};
 
 	std::unordered_map<FormID, Receiver> g_receivers;
@@ -221,6 +223,7 @@ namespace
 	void buildPartner(Partner& p, NiAVObject* root)
 	{
 		p.shapes.clear();
+		p.looked = p.genital = 0;
 		p.root = root;
 		p.age = 0.0f;
 		traverse(root, [&](NiAVObject* o) {
@@ -245,8 +248,10 @@ namespace
 					any = true;
 				}
 			}
+			++p.looked;
 			if (!any)
 				return;
+			++p.genital;
 			auto& part = sp->partitions[0];
 			auto  flags = part.vertexDesc.GetFlags();
 			if (!(flags & BSGraphics::Vertex::VF_SKINNED) || !(flags & BSGraphics::Vertex::VF_VERTEX))
@@ -298,8 +303,11 @@ namespace
 		if (p.root != root || p.age > Config::get().cacheRefreshSeconds) {
 			std::size_t before = p.shapes.size();
 			buildPartner(p, root);
-			if (Config::get().debugLog && p.shapes.size() != before)
-				logs::info("DeepFit: partner {:08X} shaft shapes {}", actor->GetFormID(), p.shapes.size());
+			if (Config::get().debugLog && (p.shapes.size() != before || (p.shapes.empty() && !p.told))) {
+				p.told = true;
+				logs::info("DeepFit: partner {:08X} ({}) shaft shapes {} ({} skinned shapes looked at, {} weighted to NPC Genitals01-06)",
+					actor->GetFormID(), actor->GetDisplayFullName(), p.shapes.size(), p.looked, p.genital);
+			}
 		}
 		return p.shapes.empty() ? nullptr : &p;
 	}
@@ -468,21 +476,36 @@ namespace
 
 	// ------------------------------------------------------------------ hook
 
-	struct PlayerUpdateHook
+	// 0.1.2: driven from the input-event queue (sent every frame) through the SKSE task queue,
+	// the way OStrands does it. PlayerCharacter::Update is not called while OStim has the player
+	// in a scene (0.1.1 logged nothing from a scene's start to its end), so the mouth never moved.
+	class FrameDriver : public BSTEventSink<InputEvent*>
 	{
-		static void thunk(PlayerCharacter* a_player, float a_delta)
+	public:
+		static FrameDriver* Get()
 		{
-			func(a_player, a_delta);
-			DeepFit::OnFrame(a_delta);
+			static FrameDriver d;
+			return &d;
 		}
-		static inline REL::Relocation<decltype(thunk)> func;
+		BSEventNotifyControl ProcessEvent(InputEvent* const*, BSTEventSource<InputEvent*>*) override
+		{
+			if (_queued.exchange(true))
+				return BSEventNotifyControl::kContinue;
+			if (auto* t = SKSE::GetTaskInterface()) {
+				t->AddTask([this]() {
+					_queued = false;
+					auto* ui = UI::GetSingleton();
+					if (ui && (ui->GameIsPaused() || ui->IsMenuOpen(MainMenu::MENU_NAME)))
+						return;
+					DeepFit::OnFrame(GetSecondsSinceLastFrame());
+				});
+			} else
+				_queued = false;
+			return BSEventNotifyControl::kContinue;
+		}
 
-		static void Install()
-		{
-			REL::Relocation<std::uintptr_t> vtbl{ VTABLE_PlayerCharacter[0] };
-			func = vtbl.write_vfunc(0xAD, thunk);
-			logs::info("DeepFit: PlayerCharacter::Update hooked");
-		}
+	private:
+		std::atomic<bool> _queued{ false };
 	};
 }
 
@@ -490,7 +513,14 @@ namespace
 
 void DeepFit::Install()
 {
-	PlayerUpdateHook::Install();
+	static bool done = false;
+	if (done)
+		return;
+	if (auto* input = BSInputDeviceManager::GetSingleton()) {
+		input->AddEventSink(FrameDriver::Get());
+		done = true;
+		logs::info("DeepFit: frame driver registered (runs during OStim scenes too)");
+	}
 }
 
 void DeepFit::OnFrame(float delta)
