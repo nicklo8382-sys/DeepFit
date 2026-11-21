@@ -61,6 +61,9 @@ namespace
 	{
 		NiAVObject*           root = nullptr;  // identity of the 3D we cached from
 		NiPointer<NiAVObject> head;
+		NiPointer<NiAVObject> hmag;          // 0.1.3: "NPC Head MagicNode [Hmag]" - in front of his face
+		NiPoint3              fx{ 1, 0, 0 }, fy{ 0, 1, 0 }, fz{ 0, 0, 1 };   // 0.1.3: his face's right / forward / up, this frame
+		bool                  toldFrame = false;
 		DrivenBone            bones[kNumSpecs];
 		int                   found = 0;
 		bool                  checked = false;
@@ -194,6 +197,8 @@ namespace
 			return nullptr;
 		}
 		r.head = NiPointer<NiAVObject>(headObj);
+		if (auto* mg = root->GetObjectByName("NPC Head MagicNode [Hmag]"))
+			r.hmag = NiPointer<NiAVObject>(mg);
 		traverse(root, [&](NiAVObject* o) {
 			int i = matchSpec(o->name.c_str());
 			if (i < 0 || !o->parent)
@@ -360,11 +365,6 @@ namespace
 	{
 		auto& cfg = Config::get();
 
-		const NiTransform& H = r.head->world;
-		const NiPoint3     X = norm(H.rotate * NiPoint3(1, 0, 0));
-		const NiPoint3     Y = norm(H.rotate * NiPoint3(0, 1, 0));
-		const NiPoint3     Z = norm(H.rotate * NiPoint3(0, 0, 1));
-
 		// rest world position of every driven bone
 		NiPoint3 rest[kNumSpecs];
 		for (int i = 0; i < kNumSpecs; ++i) {
@@ -372,6 +372,36 @@ namespace
 			if (b.valid)
 				rest[i] = b.parent->world * b.restLocal;
 		}
+		// 0.1.3: his face's own axes, from the mouth itself - right from corner to corner, forward towards the head's
+		// magic node (in front of his face), up from the two. The head bone's axes are not right / forward / up
+		// (0.1.2 pushed only the lower lip, always to its limit, and never the upper lip or the corners).
+		{
+			const NiTransform& H = r.head->world;
+			NiPoint3 X = norm(H.rotate * NiPoint3(1, 0, 0));
+			if (r.bones[7].valid && r.bones[6].valid) {
+				const NiPoint3 across = rest[7] - rest[6];   // Corner Lip Right - Corner Lip Left
+				if (len(across) > 0.05f)
+					X = norm(across);
+			}
+			NiPoint3 F = r.hmag ? r.hmag->world.translate - H.translate : H.rotate * NiPoint3(0, 1, 0);
+			F = F - X * dot(F, X);
+			NiPoint3 Y = len(F) > 0.01f ? norm(F) : norm(H.rotate * NiPoint3(0, 1, 0));
+			NiPoint3 Z = norm(NiPoint3(X.y * Y.z - X.z * Y.y, X.z * Y.x - X.x * Y.z, X.x * Y.y - X.y * Y.x));
+			if (r.bones[kUpperCenter].valid && r.bones[kBottomCenter].valid && dot(rest[kUpperCenter] - rest[kBottomCenter], Z) < 0.0f) {
+				X = X * -1.0f;   // corners the other way round: keep up pointing up
+				Z = Z * -1.0f;
+			}
+			r.fx = X;
+			r.fy = Y;
+			r.fz = Z;
+			if (cfg.debugLog && !r.toldFrame) {
+				r.toldFrame = true;
+				const NiPoint3 hx = norm(H.rotate * NiPoint3(1, 0, 0)), hy = norm(H.rotate * NiPoint3(0, 1, 0)), hz = norm(H.rotate * NiPoint3(0, 0, 1));
+				logs::info("DeepFit: face axes from the mouth (right/forward/up) against the head bone's x/y/z: right {:.2f}/{:.2f}/{:.2f}, forward {:.2f}/{:.2f}/{:.2f}, up {:.2f}/{:.2f}/{:.2f}",
+					dot(X, hx), dot(X, hy), dot(X, hz), dot(Y, hx), dot(Y, hy), dot(Y, hz), dot(Z, hx), dot(Z, hy), dot(Z, hz));
+			}
+		}
+		const NiPoint3 X = r.fx, Y = r.fy, Z = r.fz;
 		const NiPoint3 C = (rest[kUpperCenter] + rest[kBottomCenter]) * 0.5f;
 
 		// shaft vertices in head space, relative to the mouth centre
@@ -462,9 +492,8 @@ namespace
 			b.cur *= (1.0f - k);
 			if (std::fabs(b.cur) < 1e-4f)
 				b.cur = 0.0f;
-			const NiTransform& H = r.head->world;
 			NiPoint3 d = norm(kSpecs[i].dir);
-			NiPoint3 offWorld = H.rotate * d * b.cur;
+			NiPoint3 offWorld = (r.fx * d.x + r.fy * d.y + r.fz * d.z) * b.cur;   // 0.1.3: the face's own axes
 			const NiTransform& P = b.parent->world;
 			NiPoint3 offLocal = P.rotate.Transpose() * offWorld;
 			if (P.scale > 1e-6f)
