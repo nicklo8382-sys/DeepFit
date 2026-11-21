@@ -74,6 +74,7 @@ namespace
 		int                   sent[kMorphs] = { -1, -1, -1, -1, -1, -1 };
 		float                 sendTimer = 0.0f;
 		bool                  teeth = false;
+		bool                  teethSent = false;
 		bool                  toldMouth = false;
 		int                   found = 0;
 		bool                  checked = false;
@@ -612,8 +613,10 @@ namespace
 		auto act = r.actor.get();
 		if (!act)
 			return;
-		if (auto* fg = act->GetFaceGenAnimationData(); fg && cfg.teethOpen)
+		if (auto* fg = act->GetFaceGenAnimationData(); fg && cfg.teethOpen && (r.teeth || r.teethSent)) {   // 0.2.1: only while in use, and once to close
 			fg->modifierKeyFrame.SetValue(12, r.teeth ? 1.0f : 0.0f);
+			r.teethSent = r.teeth;
+		}
 		r.sendTimer -= delta;
 		if (r.sendTimer > 0.0f)
 			return;
