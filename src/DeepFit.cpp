@@ -704,12 +704,12 @@ namespace
 					if (!b || b->GetDevice() != INPUT_DEVICE::kKeyboard || static_cast<int>(b->GetIDCode()) != key || !b->IsDown())
 						continue;
 					auto* ui = UI::GetSingleton();
-					auto* cm = ControlMap::GetSingleton();
-					if ((ui && (ui->IsMenuOpen(Console::MENU_NAME) || ui->GameIsPaused())) || (cm && cm->GetRuntimeData().textEntryCount > 0))
+					// (no typing check: CommonLibSSE-NG 3.7 has no ControlMap::GetRuntimeData; the console and paused menus cover it)
+					if (ui && (ui->IsMenuOpen(Console::MENU_NAME) || ui->GameIsPaused()))
 						continue;
 					const bool on = !DeepFit::MegaMouthNow();
 					DeepFit::SetMegaOverride(on ? 1 : 0);
-					SendHUDMessage::ShowHUDMessage(on ? "DeepFit: mega mouth on" : "DeepFit: mega mouth off");
+					RE::DebugNotification(on ? "DeepFit: mega mouth on" : "DeepFit: mega mouth off");
 					logs::info("DeepFit: mega mouth {} (key)", on ? "on" : "off");
 				}
 			}
