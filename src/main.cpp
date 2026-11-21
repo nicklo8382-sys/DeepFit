@@ -1,5 +1,6 @@
 #include "Config.h"
 #include "DeepFit.h"
+#include "Menu.h"
 #include <spdlog/sinks/basic_file_sink.h>
 
 namespace
@@ -22,6 +23,8 @@ namespace
 	{
 		if (!a_msg)
 			return;
+		if (a_msg->type == SKSE::MessagingInterface::kPostPostLoad)
+			DeepFit::Menu::Register();
 		if (a_msg->type == SKSE::MessagingInterface::kInputLoaded)
 			DeepFit::Install();
 		if (a_msg->type == SKSE::MessagingInterface::kDataLoaded) {
@@ -35,7 +38,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 {
 	SKSE::Init(a_skse);
 	SetupLog();
-	logs::info("DeepFit 0.2.1 loading");
+	logs::info("DeepFit 0.3.0 loading");
 	Config::get().load();
 	if (auto* msg = SKSE::GetMessagingInterface())
 		msg->RegisterListener(MessageHandler);

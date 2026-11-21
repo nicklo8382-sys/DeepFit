@@ -38,3 +38,9 @@ Mouth (0.2.0)
   MegaMouth = 1 opens it as wide as it goes instead. Settings: DeepFit.ini, section "the mouth itself".
   The bundled PPA preset (ppa-override-configs\00SMP_Head_PPA_Male.toml) only quiets OStim's
   expression while the mouth is in use. Set MouthMorphs = 0 to give the morphs back to PPA or another mod.
+
+In game (0.3.0)
+  With SKSE Menu Framework installed, DeepFit has its own page (DeepFit > Mouth): every setting, applied at
+  once and saved to DeepFit.ini. "Mega mouth key" sets a key that switches Mega mouth on and off in a scene.
+  Other mods: SendModEvent("DeepFit_MegaMouth", "", 1.0) turns Mega mouth on, 0.0 off, -1.0 back to the
+  setting; "DeepFit_Mouth" the same for DeepFit opening the mouth at all.

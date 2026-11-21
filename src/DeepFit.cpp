@@ -448,7 +448,7 @@ namespace
 		}
 		// 0.2.0: the mouth opens to the shaft: its height and width where it passes the lips, and how deep the tip is
 		float comp[kNumSpecs] = {};   // how far the morphs already moved each lip (the bones then only make up the rest)
-		if (cfg.mouthMorphs) {
+		if (DeepFit::MouthNow()) {
 			float zTop = -1e9f, zBot = 1e9f, xL = 1e9f, xR = -1e9f, depth = 0.0f;
 			for (auto& p : hs) {
 				if (p.x * p.x + p.z * p.z > 36.0f)
@@ -468,9 +468,9 @@ namespace
 			float want[kMorphs] = {};
 			if (through) {
 				const float open = height + cfg.mouthExtra;
-				want[0] = cfg.megaMouth ? cfg.morphMax : open / std::max(cfg.jawUnits, 0.1f) * 100.0f;
-				want[1] = cfg.megaMouth ? cfg.morphMax : open * 0.5f / std::max(cfg.lipUnits, 0.1f) * 100.0f;
-				want[2] = cfg.megaMouth ? cfg.morphMax : std::max(0.0f, (width + cfg.mouthExtra - restWidth) * 0.5f) / std::max(cfg.widenUnits, 0.1f) * 100.0f;
+				want[0] = DeepFit::MegaMouthNow() ? cfg.morphMax : open / std::max(cfg.jawUnits, 0.1f) * 100.0f;
+				want[1] = DeepFit::MegaMouthNow() ? cfg.morphMax : open * 0.5f / std::max(cfg.lipUnits, 0.1f) * 100.0f;
+				want[2] = DeepFit::MegaMouthNow() ? cfg.morphMax : std::max(0.0f, (width + cfg.mouthExtra - restWidth) * 0.5f) / std::max(cfg.widenUnits, 0.1f) * 100.0f;
 			}
 			if (cfg.throatMorphs && (through || inMouth)) {
 				auto ramp = [&](float a, float b) { return std::clamp((depth - a) / (b - a), 0.0f, 1.0f) * cfg.morphMax; };
@@ -492,9 +492,24 @@ namespace
 				else if (kSpecs[i].kind == Kind::Corner)
 					comp[i] = widen;
 			}
+			if (cfg.debugLog && g_logTimer > 1.0f) {   // 0.2.2: where the shaft is, from his mouth (right / forward / up)
+				const NiPoint3* nearest = nullptr;
+				float           best = 1e9f;
+				for (auto& p : hs) {
+					const float d = p.x * p.x + p.y * p.y + p.z * p.z;
+					if (d < best) {
+						best = d;
+						nearest = &p;
+					}
+				}
+				if (nearest)
+					logs::info("DeepFit: nearest shaft point {:.1f} from the mouth centre (right {:.1f}, forward {:.1f}, up {:.1f}); lips {:.1f} apart",
+						std::sqrt(best), nearest->x, nearest->y, nearest->z,
+						(r.bones[kUpperCenter].valid && r.bones[kBottomCenter].valid) ? len(rest[kUpperCenter] - rest[kBottomCenter]) : -1.0f);
+			}
 			if (cfg.debugLog && g_logTimer > 1.0f)
 				logs::info("DeepFit: mouth - shaft {:.2f} tall, {:.2f} wide at the lips, tip {:.1f} deep | jaw {:.0f} round {:.0f} widen {:.0f} throat {:.0f}/{:.0f}/{:.0f}{}",
-					height, width, depth, r.morph[0], r.morph[1], r.morph[2], r.morph[3], r.morph[4], r.morph[5], cfg.megaMouth ? " (mega mouth)" : "");
+					height, width, depth, r.morph[0], r.morph[1], r.morph[2], r.morph[3], r.morph[4], r.morph[5], DeepFit::MegaMouthNow() ? " (mega mouth)" : "");
 		}
 		for (int i = 0; i < kNumSpecs; ++i) {
 			auto& b = r.bones[i];
@@ -522,8 +537,8 @@ namespace
 						sMax = s;
 				}
 				float mx = mxLip;
-				if (cfg.mouthMorphs) {   // 0.2.0: the morphs opened the mouth; the bones fit the lips to the shaft (out, or back in round a slim one)
-					target[i] = sMax > -1e8f ? std::clamp(sMax + cfg.lipMargin + cfg.stretch - sRest - comp[i], -cfg.lipCloseMax, mx) : 0.0f;
+				if (DeepFit::MouthNow()) {   // 0.2.0: the morphs opened the mouth; the bones fit the lips to the shaft (out, or back in round a slim one)
+					target[i] = sMax > -1e8f ? std::clamp(sMax + cfg.lipMargin + cfg.stretch - sRest - comp[i], DeepFit::MegaMouthNow() ? 0.0f : -cfg.lipCloseMax, mx) : 0.0f;
 				} else {
 					target[i] = sMax > -1e8f ? std::clamp(sMax + cfg.lipMargin + cfg.stretch - sRest, 0.0f, mx) : 0.0f;
 					if (inMouth)
@@ -603,12 +618,41 @@ namespace
 
 	// ------------------------------------------------------------------ hook
 
+	// 0.3.0: switched from outside (the key, other mods' mod events): -1 = as the setting says
+	std::atomic<int> g_megaOverride{ -1 };
+	std::atomic<int> g_mouthOverride{ -1 };
+
+	class ModEvents : public BSTEventSink<SKSE::ModCallbackEvent>
+	{
+	public:
+		static ModEvents* Get()
+		{
+			static ModEvents m;
+			return &m;
+		}
+		BSEventNotifyControl ProcessEvent(const SKSE::ModCallbackEvent* a_event, BSTEventSource<SKSE::ModCallbackEvent>*) override
+		{
+			if (!a_event)
+				return BSEventNotifyControl::kContinue;
+			const std::string_view name = a_event->eventName.c_str() ? a_event->eventName.c_str() : "";
+			const int v = a_event->numArg < -0.5f ? -1 : (a_event->numArg > 0.5f ? 1 : 0);
+			if (name == "DeepFit_MegaMouth") {
+				g_megaOverride = v;
+				logs::info("DeepFit: mega mouth {} (mod event)", v < 0 ? "back to the setting" : (v ? "on" : "off"));
+			} else if (name == "DeepFit_Mouth") {
+				g_mouthOverride = v;
+				logs::info("DeepFit: opening the mouth {} (mod event)", v < 0 ? "back to the setting" : (v ? "on" : "off"));
+			}
+			return BSEventNotifyControl::kContinue;
+		}
+	};
+
 	// 0.2.0: hand the mouth morphs to MFEE (its Papyrus function, on the game thread we run on) and the teeth modifier
 	// to the face; only when a value has really changed, at most 20 times a second
 	void sendMouth(Receiver& r, float delta)
 	{
 		auto& cfg = Config::get();
-		if (!cfg.mouthMorphs)
+		if (!DeepFit::MouthNow())
 			return;
 		auto act = r.actor.get();
 		if (!act)
@@ -651,8 +695,24 @@ namespace
 			static FrameDriver d;
 			return &d;
 		}
-		BSEventNotifyControl ProcessEvent(InputEvent* const*, BSTEventSource<InputEvent*>*) override
+		BSEventNotifyControl ProcessEvent(InputEvent* const* a_events, BSTEventSource<InputEvent*>*) override
 		{
+			// 0.3.0: the Mega mouth key
+			if (const int key = Config::get().megaKey; key > 0 && a_events) {
+				for (auto* e = *a_events; e; e = e->next) {
+					auto* b = e->AsButtonEvent();
+					if (!b || b->GetDevice() != INPUT_DEVICE::kKeyboard || static_cast<int>(b->GetIDCode()) != key || !b->IsDown())
+						continue;
+					auto* ui = UI::GetSingleton();
+					auto* cm = ControlMap::GetSingleton();
+					if ((ui && (ui->IsMenuOpen(Console::MENU_NAME) || ui->GameIsPaused())) || (cm && cm->GetRuntimeData().textEntryCount > 0))
+						continue;
+					const bool on = !DeepFit::MegaMouthNow();
+					DeepFit::SetMegaOverride(on ? 1 : 0);
+					SendHUDMessage::ShowHUDMessage(on ? "DeepFit: mega mouth on" : "DeepFit: mega mouth off");
+					logs::info("DeepFit: mega mouth {} (key)", on ? "on" : "off");
+				}
+			}
 			if (_queued.exchange(true))
 				return BSEventNotifyControl::kContinue;
 			if (auto* t = SKSE::GetTaskInterface()) {
@@ -675,8 +735,32 @@ namespace
 
 // ---------------------------------------------------------------------------------------------
 
+bool DeepFit::MegaMouthNow()
+{
+	const int o = g_megaOverride.load();
+	return o < 0 ? Config::get().megaMouth : o == 1;
+}
+
+bool DeepFit::MouthNow()
+{
+	const int o = g_mouthOverride.load();
+	return o < 0 ? Config::get().mouthMorphs : o == 1;
+}
+
+void DeepFit::SetMegaOverride(int a_value)
+{
+	g_megaOverride = a_value;
+}
+
 void DeepFit::Install()
 {
+	static bool events = false;
+	if (!events) {
+		if (auto* src = SKSE::GetModCallbackEventSource()) {
+			src->AddEventSink(ModEvents::Get());
+			events = true;
+		}
+	}
 	static bool done = false;
 	if (done)
 		return;

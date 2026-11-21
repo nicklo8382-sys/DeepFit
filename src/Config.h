@@ -23,6 +23,7 @@ struct Config
 	// DeepFit opens it to the shaft's thickness at the lips (closes it again round a slimmer one), or as wide as it goes
 	bool  mouthMorphs = true;      // DeepFit drives the mouth morphs (turn off to leave them to PPA or another mod)
 	bool  megaMouth = false;       // as wide as the morphs go, whatever the shaft
+	int   megaKey = 0;             // 0.3.0: a key that switches Mega mouth on / off in game (DirectInput scan code, 0 = none)
 	float mouthExtra = 0.3f;       // opened this much more than the shaft is thick
 	float jawUnits = 4.5f;         // how far PPA_JawWide at 100 opens the jaw (units)
 	float lipUnits = 2.8f;         // how far PPA_LipStretch at 100 rounds the lips out
@@ -46,4 +47,5 @@ struct Config
 
 	static Config& get();
 	void           load();
+	void           save();   // 0.3.0: the in-game menu writes its changes back to DeepFit.ini (keeps the comments)
 };
