@@ -46,6 +46,20 @@ void Config::load()
 		else if (k == "UpperLipMax") fl(upperLipMax);
 		else if (k == "LowerLipMax") fl(lowerLipMax);
 		else if (k == "CornerMax") fl(cornerMax);
+		else if (k == "Stretch") fl(stretch);
+		else if (k == "MinOpen") fl(minOpen);
+		else if (k == "MinCorner") fl(minCorner);
+		else if (k == "MouthMorphs") bl(mouthMorphs);
+		else if (k == "MegaMouth") bl(megaMouth);
+		else if (k == "MouthExtra") fl(mouthExtra);
+		else if (k == "JawUnits") fl(jawUnits);
+		else if (k == "LipUnits") fl(lipUnits);
+		else if (k == "WidenUnits") fl(widenUnits);
+		else if (k == "MorphMax") fl(morphMax);
+		else if (k == "MorphLerpMs") { try { morphLerpMs = std::stoi(v); } catch (...) {} }
+		else if (k == "ThroatMorphs") bl(throatMorphs);
+		else if (k == "TeethOpen") bl(teethOpen);
+		else if (k == "LipCloseMax") fl(lipCloseMax);
 		else if (k == "NoseFollow") fl(noseFollow);
 		else if (k == "NoseMax") fl(noseMax);
 		else if (k == "ThroatEnabled") bl(throatEnabled);

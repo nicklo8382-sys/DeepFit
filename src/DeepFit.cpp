@@ -57,6 +57,10 @@ namespace
 		bool                  valid = false;
 	};
 
+	// 0.2.0: the mouth morphs DeepFit drives (SMP Head's, through MFEE)
+	constexpr int         kMorphs = 6;
+	constexpr const char* kMorphNames[kMorphs] = { "PPA_JawWide", "PPA_LipStretch", "PPA_LipWiden", "PPA_TH1", "PPA_TH2", "PPA_TH3" };
+
 	struct Receiver
 	{
 		NiAVObject*           root = nullptr;  // identity of the 3D we cached from
@@ -65,6 +69,12 @@ namespace
 		NiPoint3              fx{ 1, 0, 0 }, fy{ 0, 1, 0 }, fz{ 0, 0, 1 };   // 0.1.3: his face's right / forward / up, this frame
 		bool                  toldFrame = false;
 		DrivenBone            bones[kNumSpecs];
+		ActorHandle           actor;                 // 0.2.0: whose face the morphs go on
+		float                 morph[kMorphs] = {};   // 0.2.0: eased mouth morph values (0-100)
+		int                   sent[kMorphs] = { -1, -1, -1, -1, -1, -1 };
+		float                 sendTimer = 0.0f;
+		bool                  teeth = false;
+		bool                  toldMouth = false;
 		int                   found = 0;
 		bool                  checked = false;
 		float                 retry = 0.0f;  // seconds until we look for the mouth bones again
@@ -188,6 +198,7 @@ namespace
 		// (re)build
 		r = Receiver{};
 		r.root = root;
+		r.actor = actor->GetHandle();
 		r.checked = true;
 		r.retry = 2.0f;
 		auto headObj = root->GetObjectByName("NPC Head [Head]");
@@ -425,6 +436,65 @@ namespace
 		}
 
 		float target[kNumSpecs] = {};
+		// 0.1.4: is the shaft in his mouth at all (near the mouth centre, at the lips' depth)? Then every lip opens at least
+		// MinOpen and the corners spread at least MinCorner, even where no shaft point falls in that lip's own lane
+		bool inMouth = false;
+		for (auto& p : hs) {
+			if (std::fabs(p.y) < cfg.lipDepthSlab * 2.0f && p.x * p.x + p.z * p.z < 9.0f) {
+				inMouth = true;
+				break;
+			}
+		}
+		// 0.2.0: the mouth opens to the shaft: its height and width where it passes the lips, and how deep the tip is
+		float comp[kNumSpecs] = {};   // how far the morphs already moved each lip (the bones then only make up the rest)
+		if (cfg.mouthMorphs) {
+			float zTop = -1e9f, zBot = 1e9f, xL = 1e9f, xR = -1e9f, depth = 0.0f;
+			for (auto& p : hs) {
+				if (p.x * p.x + p.z * p.z > 36.0f)
+					continue;
+				if (std::fabs(p.y) < cfg.lipDepthSlab * 1.5f) {
+					zTop = std::max(zTop, p.z);
+					zBot = std::min(zBot, p.z);
+					xL = std::min(xL, p.x);
+					xR = std::max(xR, p.x);
+				}
+				depth = std::max(depth, -p.y);   // into his mouth is backwards (-forward)
+			}
+			const bool  through = zTop > zBot;
+			const float height = through ? zTop - zBot : 0.0f;
+			const float width = through ? xR - xL : 0.0f;
+			const float restWidth = (r.bones[6].valid && r.bones[7].valid) ? len(rest[7] - rest[6]) : 4.0f;
+			float want[kMorphs] = {};
+			if (through) {
+				const float open = height + cfg.mouthExtra;
+				want[0] = cfg.megaMouth ? cfg.morphMax : open / std::max(cfg.jawUnits, 0.1f) * 100.0f;
+				want[1] = cfg.megaMouth ? cfg.morphMax : open * 0.5f / std::max(cfg.lipUnits, 0.1f) * 100.0f;
+				want[2] = cfg.megaMouth ? cfg.morphMax : std::max(0.0f, (width + cfg.mouthExtra - restWidth) * 0.5f) / std::max(cfg.widenUnits, 0.1f) * 100.0f;
+			}
+			if (cfg.throatMorphs && (through || inMouth)) {
+				auto ramp = [&](float a, float b) { return std::clamp((depth - a) / (b - a), 0.0f, 1.0f) * cfg.morphMax; };
+				want[3] = ramp(5.0f, 8.5f);
+				want[4] = ramp(8.5f, 12.0f);
+				want[5] = ramp(12.0f, 20.0f);
+			}
+			const float km = 1.0f - std::exp(-delta * 10.0f);
+			for (int m = 0; m < kMorphs; ++m) {
+				want[m] = std::clamp(want[m], 0.0f, cfg.morphMax);
+				r.morph[m] += (want[m] - r.morph[m]) * km;
+			}
+			r.teeth = cfg.teethOpen && (through || inMouth);
+			// what the morphs did to each lip (their size at 100, from the SMP Head tri): the bones only make up the rest
+			const float jaw = r.morph[0] / 100.0f * cfg.jawUnits, round = r.morph[1] / 100.0f * cfg.lipUnits, widen = r.morph[2] / 100.0f * cfg.widenUnits;
+			for (int i = 0; i < kNumSpecs; ++i) {
+				if (kSpecs[i].kind == Kind::Lip)
+					comp[i] = kSpecs[i].dir.z > 0 ? round * 0.5f : jaw * 0.85f + round * 0.5f;
+				else if (kSpecs[i].kind == Kind::Corner)
+					comp[i] = widen;
+			}
+			if (cfg.debugLog && g_logTimer > 1.0f)
+				logs::info("DeepFit: mouth - shaft {:.2f} tall, {:.2f} wide at the lips, tip {:.1f} deep | jaw {:.0f} round {:.0f} widen {:.0f} throat {:.0f}/{:.0f}/{:.0f}{}",
+					height, width, depth, r.morph[0], r.morph[1], r.morph[2], r.morph[3], r.morph[4], r.morph[5], cfg.megaMouth ? " (mega mouth)" : "");
+		}
 		for (int i = 0; i < kNumSpecs; ++i) {
 			auto& b = r.bones[i];
 			if (!b.valid)
@@ -451,7 +521,13 @@ namespace
 						sMax = s;
 				}
 				float mx = mxLip;
-				target[i] = sMax > -1e8f ? std::clamp(sMax + cfg.lipMargin - sRest, 0.0f, mx) : 0.0f;
+				if (cfg.mouthMorphs) {   // 0.2.0: the morphs opened the mouth; the bones fit the lips to the shaft (out, or back in round a slim one)
+					target[i] = sMax > -1e8f ? std::clamp(sMax + cfg.lipMargin + cfg.stretch - sRest - comp[i], -cfg.lipCloseMax, mx) : 0.0f;
+				} else {
+					target[i] = sMax > -1e8f ? std::clamp(sMax + cfg.lipMargin + cfg.stretch - sRest, 0.0f, mx) : 0.0f;
+					if (inMouth)
+						target[i] = std::min(std::max(target[i], spec.kind == Kind::Corner ? cfg.minCorner : cfg.minOpen), mx);
+				}
 			} else if (spec.kind == Kind::Throat) {
 				if (!cfg.throatEnabled)
 					continue;
@@ -498,6 +574,12 @@ namespace
 
 	void relax(Receiver& r, float delta)
 	{
+		{   // 0.2.0: no shaft: the mouth morphs ease back to nothing
+			const float km = 1.0f - std::exp(-delta * 6.0f);
+			for (int m = 0; m < kMorphs; ++m)
+				r.morph[m] -= r.morph[m] * km;
+			r.teeth = false;
+		}
 		// no shaft nearby: ease every bone back to rest
 		const float k = 1.0f - std::exp(-delta * Config::get().smoothSpeed);
 		for (int i = 0; i < kNumSpecs; ++i) {
@@ -519,6 +601,41 @@ namespace
 	}
 
 	// ------------------------------------------------------------------ hook
+
+	// 0.2.0: hand the mouth morphs to MFEE (its Papyrus function, on the game thread we run on) and the teeth modifier
+	// to the face; only when a value has really changed, at most 20 times a second
+	void sendMouth(Receiver& r, float delta)
+	{
+		auto& cfg = Config::get();
+		if (!cfg.mouthMorphs)
+			return;
+		auto act = r.actor.get();
+		if (!act)
+			return;
+		if (auto* fg = act->GetFaceGenAnimationData(); fg && cfg.teethOpen)
+			fg->modifierKeyFrame.SetValue(12, r.teeth ? 1.0f : 0.0f);
+		r.sendTimer -= delta;
+		if (r.sendTimer > 0.0f)
+			return;
+		r.sendTimer = 0.05f;
+		auto* vm = BSScript::Internal::VirtualMachine::GetSingleton();
+		if (!vm)
+			return;
+		for (int m = 0; m < kMorphs; ++m) {
+			const int v = static_cast<int>(std::lround(r.morph[m]));
+			if (r.sent[m] >= 0 && std::abs(v - r.sent[m]) < 2 && !(v == 0 && r.sent[m] != 0))
+				continue;
+			r.sent[m] = v;
+			BSTSmartPointer<BSScript::IStackCallbackFunctor> cb;
+			auto* args = MakeFunctionArguments(static_cast<Actor*>(act.get()), BSFixedString(kMorphNames[m]), static_cast<std::int32_t>(v),
+				static_cast<std::int32_t>(cfg.morphLerpMs));
+			vm->DispatchStaticCall("MuFacialExpressionExtended", "SetExpressionByNameEx", args, cb);
+			if (!r.toldMouth && cfg.debugLog) {
+				r.toldMouth = true;
+				logs::info("DeepFit: driving the mouth morphs through MFEE ({}...)", kMorphNames[m]);
+			}
+		}
+	}
 
 	// 0.1.2: driven from the input-event queue (sent every frame) through the SKSE task queue,
 	// the way OStrands does it. PlayerCharacter::Update is not called while OStim has the player
@@ -616,6 +733,7 @@ void DeepFit::OnFrame(float delta)
 			relax(*r, delta);
 		else
 			solve(*r, shaft, delta);
+		sendMouth(*r, delta);
 	}
 	static float heartbeat = 0.0f;
 	heartbeat += delta;

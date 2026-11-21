@@ -28,3 +28,13 @@ FSMP must stay installed (it merges the head bones into the skeleton), but the
 ## Tuning
 `SKSE/Plugins/DeepFit.ini` - see the comments. `DebugLog = 1` writes the bone
 pushes once a second to `My Games/Skyrim Special Edition/SKSE/DeepFit.log`.
+
+Mouth (0.2.0)
+  DeepFit is the one thing that moves the mouth of an SMP Head actor, so other mods can build on it:
+  it opens the jaw and rounds / widens the lips with the head's own MFEE morphs (PPA_JawWide,
+  PPA_LipStretch, PPA_LipWiden) to the partner's shaft thickness where it passes the lips - a slim
+  shaft gets a small O, a thick one or a knot a wide one, and it closes again as it slides out -
+  then fits the lip bones snugly round it. PPA_TH1-3 swell the throat by depth, and the teeth part.
+  MegaMouth = 1 opens it as wide as it goes instead. Settings: DeepFit.ini, section "the mouth itself".
+  The bundled PPA preset (ppa-override-configs\00SMP_Head_PPA_Male.toml) only quiets OStim's
+  expression while the mouth is in use. Set MouthMorphs = 0 to give the morphs back to PPA or another mod.
