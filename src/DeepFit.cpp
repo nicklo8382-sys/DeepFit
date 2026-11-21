@@ -266,6 +266,13 @@ namespace
 			const std::uint32_t vSize = part.vertexDesc.GetSize();
 			const std::uint32_t skinOff = part.vertexDesc.GetAttributeOffset(BSGraphics::Vertex::VA_SKINNING);
 			const std::uint8_t* data = part.buffData->rawVertexData;
+			// 0.1.4: full or half precision positions: the size of the position block before the next attribute (as OStrands reads it)
+			std::uint32_t posBytes = vSize;
+			for (std::uint8_t at = BSGraphics::Vertex::VA_TEXCOORD0; at < BSGraphics::Vertex::VA_COUNT; ++at) {
+				if (part.vertexDesc.HasFlag(static_cast<BSGraphics::Vertex::Flags>(1u << at)))
+					posBytes = std::min(posBytes, part.vertexDesc.GetAttributeOffset(static_cast<BSGraphics::Vertex::Attribute>(at)));
+			}
+			const bool fullPrec = posBytes >= 12;
 
 			ShaftShape shape;
 			shape.geom = NiPointer<BSGeometry>(geom);
@@ -286,7 +293,12 @@ namespace
 				if (tot <= 0.0f || genW / tot < 0.6f)
 					continue;
 				ShaftVert sv;
-				sv.skinPos = *reinterpret_cast<const NiPoint3*>(v);
+				if (fullPrec)
+					sv.skinPos = *reinterpret_cast<const NiPoint3*>(v);
+				else {   // 0.1.4: half-precision positions (most SE meshes) - 0.1.3 read them as floats and got scattered points
+					const std::uint16_t* h3 = reinterpret_cast<const std::uint16_t*>(v);
+					sv.skinPos = NiPoint3(half2float(h3[0]), half2float(h3[1]), half2float(h3[2]));
+				}
 				for (int k = 0; k < 4; ++k) {
 					sv.bone[k] = bi[k];
 					sv.weight[k] = w[k] / tot;
@@ -426,16 +438,19 @@ namespace
 				NiPoint3 e(d.z, 0.0f, -d.x);  // across the lip, in the mouth plane
 				float    sRest = rh.x * d.x + rh.z * d.z;
 				float    sMax = -1e9f;
+				const float mxLip = spec.kind == Kind::Corner ? cfg.cornerMax : (spec.dir.z > 0 ? cfg.upperLipMax : cfg.lowerLipMax);
 				for (auto& p : hs) {
 					if (std::fabs(p.y - rh.y) > cfg.lipDepthSlab)
 						continue;
 					if (std::fabs(p.x * e.x + p.z * e.z) > cfg.lipLaneWidth)
 						continue;
 					float s = p.x * d.x + p.z * d.z;
+					if (s - sRest > mxLip * 2.0f + 1.0f)
+						continue;   // 0.1.4: far past what this lip can reach (the shaft's base, the balls) - not round the lip
 					if (s > sMax)
 						sMax = s;
 				}
-				float mx = spec.kind == Kind::Corner ? cfg.cornerMax : (spec.dir.z > 0 ? cfg.upperLipMax : cfg.lowerLipMax);
+				float mx = mxLip;
 				target[i] = sMax > -1e8f ? std::clamp(sMax + cfg.lipMargin - sRest, 0.0f, mx) : 0.0f;
 			} else if (spec.kind == Kind::Throat) {
 				if (!cfg.throatEnabled)
