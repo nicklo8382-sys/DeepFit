@@ -35,6 +35,24 @@ struct Config
 	float throatMorphMax = 120.0f; // 0.3.4: the throat morphs' own most (they share one smooth ridge; MorphMax still caps it)
 	float throatFrom = 5.0f;       // 0.3.4: tip this deep (units past the lips) = the throat starts to swell
 	float throatFull = 14.0f;      // 0.3.4: this deep = the whole ridge is out
+	float lipRound = 0.6f;         // 0.3.8: how much of the lip-rounding morph is used (the rest of the opening goes to the sides)
+	float mouthWideGain = 1.0f;    // 0.3.8: DF_MouthWide - units each corner goes out per unit needed
+	float mouthWideMax = 1.8f;     // 0.3.8: the most each corner goes out (units)
+	float cornerOpen = 0.12f;      // 0.3.8: corners also go out by this share of how far the mouth is open
+	bool  guessRigs = true;        // 0.4.0: a skeleton DeepFit does not know: its schlong bones guessed from their names
+	bool  anyMeshAtLips = false;   // 0.4.0: still nothing: any of his mesh that reaches the lips counts (heavier)
+	bool  throatAxisFit = true;    // 0.4.0: measure the shaft along its own line (angled / bent shafts)
+	float cheekGain = 1.0f;        // 0.4.0: a shaft pushed to one side bulges that cheek (units per unit past CheekInner)
+	float cheekMax = 1.2f;
+	float cheekInner = 1.6f;       // 0.4.0: room inside his mouth to each side before the cheek is pushed
+	float gulpSize = 1.2f;         // 0.4.0: a swallow running down his throat (units; 0 = off) - Anatomica's gulps
+	float gulpTime = 0.7f;         // seconds from chin to neck
+	float gagJaw = 25.0f;          // 0.4.0: a gag drops his jaw this much more (morph), ...
+	float gagSqueeze = 0.4f;       // ... and tightens his throat by this share
+	float gagTime = 0.9f;
+	float shapeRidge = 0.6f;       // 0.4.0: a ridged schlong's ridge down his throat (units)
+	float shapeKnob = 0.7f;        // 0.4.0: a segmented schlong's knobs (units)
+	bool  malesOnly = true;        // 0.3.7: only male mouths are fitted (women keep SMP Head's own physics / PPA)
 	bool  throatShape = true;      // 0.3.5: DF_ThroatFill1-10 / DF_Throat1-10 follow the schlong's own shape (thickness along it)
 	float throatBand = 0.6f;       // 0.3.5: units of shaft per throat band (10 bands, from ThroatFrom deep)
 	float throatFill = 1.0f;       // 0.3.5: how far out onto the chin-to-seam line his throat fills where the shaft is (0-1)
@@ -47,6 +65,28 @@ struct Config
 	float throatMotionLen = 2.0f;  // 0.3.6: its length along the shaft (units)
 	float throatDetail = 1.6f;     // 0.3.5: a flare / ring / knot this many times more pronounced than the shaft's own
 	bool  teethOpen = true;        // the SMP Head teeth-open modifier (12) while the shaft is in his mouth
+	int   teethMove = 1;           // 0.4.0: teeth moved down / back: 0 off, 1 while the mouth is full, 2 always
+	float teethDown = 0.3f;        // units
+	float teethBack = 0.3f;        // units
+	std::string teethParts = "teeth";   // 0.4.0: the face parts that count as teeth (part of their name, comma separated)
+	bool  faceReact = true;        // 0.4.0: eyes close / brows lift with depth, clench in a gag
+	float faceEyes = 0.5f;
+	float faceBrows = 0.4f;
+	float faceGag = 0.8f;
+	float lipDrag = 0.35f;         // 0.4.0: lips roll out as he pulls back, tuck in as he pushes in (units)
+	float lipDragSpeed = 20.0f;    // stroke speed (units a second) for the full drag
+	float recoverHold = 1.0f;      // 0.4.0: after he pulls out the mouth stays open this long (s) ...
+	float recoverOpen = 0.35f;     // ... this share of how open it was ...
+	bool  recoverGulp = true;      // ... then he swallows
+	bool  autoGagGulp = true;      // 0.4.0: gags and swallows by DeepFit itself (Anatomica's come first)
+	float autoDeep = 4.0f;         // this far past the top of his throat counts as deep (units)
+	float autoGagSpeed = 25.0f;    // a deep thrust this fast (units a second) makes him gag
+	float autoGagCooldown = 3.0f;  // s
+	float autoGulpHold = 1.5f;     // held deep this long (s) and he swallows
+	std::string raceStrength;      // 0.4.0: "RaceEditorID:0.80, OtherRace:1.20" - the partner's race scales the mouth and throat
+	float raceStrengthFor(const std::string& a_race) const;
+	void  setRaceStrength(const std::string& a_race, float a_k);
+	void  clearRaces();
 	float lipCloseMax = 2.0f;      // lips may close in this far (round a slim shaft once the jaw is open)
 	float upperLipDown = 0.6f;     // 0.3.3: the upper lip pulled down this far while the mouth is full (the lip morph peaks it up to the nose)
 	float noseFollow = 0.5f;       // nose base rises by this fraction of the upper-lip-center push

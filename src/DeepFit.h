@@ -2,6 +2,17 @@
 
 namespace DeepFit
 {
+	struct Preview   // 0.4.0: the test page - a made-up schlong in the player's mouth, no scene needed
+	{
+		bool  on = false;
+		float depth = 9.0f;     // how far in its tip goes (units past his lips)
+		float thick = 1.3f;     // half its height
+		float width = 1.3f;     // half its width
+		int   shape = 0;        // 0 plain, 1 horse (flare + medial ring), 2 knot, 3 ridged, 4 segmented
+		bool  strokes = true;   // goes in and out
+	};
+	Preview& GetPreview();
+	std::string StatusText(std::string* a_race = nullptr, float* a_ago = nullptr);   // 0.4.0: what DeepFit last found (the menu)
 	void Install();            // frame driver (at input loaded)
 	void OnFrame(float delta);
 	bool MegaMouthNow();            // 0.3.0: the setting, or what the key / a mod event switched it to

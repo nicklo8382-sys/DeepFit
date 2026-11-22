@@ -1,4 +1,5 @@
 #include "Config.h"
+#include <mutex>
 
 Config& Config::get()
 {
@@ -64,6 +65,43 @@ void Config::load()
 		else if (k == "ThroatFrom") fl(throatFrom);
 		else if (k == "ThroatFull") fl(throatFull);
 		else if (k == "ThroatShape") bl(throatShape);
+		else if (k == "MalesOnly") bl(malesOnly);
+		else if (k == "ThroatAxisFit") bl(throatAxisFit);
+		else if (k == "GuessRigs") bl(guessRigs);
+		else if (k == "TeethMove") { try { teethMove = std::clamp(std::stoi(v), 0, 2); } catch (...) {} }
+		else if (k == "TeethDown") fl(teethDown);
+		else if (k == "TeethBack") fl(teethBack);
+		else if (k == "TeethParts") teethParts = v;
+		else if (k == "FaceReact") bl(faceReact);
+		else if (k == "FaceEyes") fl(faceEyes);
+		else if (k == "FaceBrows") fl(faceBrows);
+		else if (k == "FaceGag") fl(faceGag);
+		else if (k == "LipDrag") fl(lipDrag);
+		else if (k == "LipDragSpeed") fl(lipDragSpeed);
+		else if (k == "RecoverHold") fl(recoverHold);
+		else if (k == "RecoverOpen") fl(recoverOpen);
+		else if (k == "RecoverGulp") bl(recoverGulp);
+		else if (k == "AutoGagGulp") bl(autoGagGulp);
+		else if (k == "AutoDeep") fl(autoDeep);
+		else if (k == "AutoGagSpeed") fl(autoGagSpeed);
+		else if (k == "AutoGagCooldown") fl(autoGagCooldown);
+		else if (k == "AutoGulpHold") fl(autoGulpHold);
+		else if (k == "RaceStrength") raceStrength = v;
+		else if (k == "AnyMeshAtLips") bl(anyMeshAtLips);
+		else if (k == "CheekGain") fl(cheekGain);
+		else if (k == "CheekMax") fl(cheekMax);
+		else if (k == "CheekInner") fl(cheekInner);
+		else if (k == "GulpSize") fl(gulpSize);
+		else if (k == "GulpTime") fl(gulpTime);
+		else if (k == "GagJaw") fl(gagJaw);
+		else if (k == "GagSqueeze") fl(gagSqueeze);
+		else if (k == "GagTime") fl(gagTime);
+		else if (k == "ShapeRidge") fl(shapeRidge);
+		else if (k == "ShapeKnob") fl(shapeKnob);
+		else if (k == "LipRound") fl(lipRound);
+		else if (k == "MouthWideGain") fl(mouthWideGain);
+		else if (k == "MouthWideMax") fl(mouthWideMax);
+		else if (k == "CornerOpen") fl(cornerOpen);
 		else if (k == "ThroatBand") fl(throatBand);
 		else if (k == "ThroatFill") fl(throatFill);
 		else if (k == "ThroatRest") fl(throatRest);
@@ -107,7 +145,18 @@ void Config::save()
 		{ "MouthExtra", f2(mouthExtra) }, { "JawUnits", f2(jawUnits) }, { "LipUnits", f2(lipUnits) }, { "WidenUnits", f2(widenUnits) },
 		{ "MorphMax", f2(morphMax) }, { "MorphLerpMs", std::to_string(morphLerpMs) }, { "ThroatMorphs", b2(throatMorphs) },
 		{ "ThroatMorphMax", f2(throatMorphMax) }, { "ThroatFrom", f2(throatFrom) }, { "ThroatFull", f2(throatFull) },
-		{ "ThroatShape", b2(throatShape) }, { "ThroatBand", f2(throatBand) }, { "ThroatFill", f2(throatFill) }, { "ThroatRest", f2(throatRest) },
+		{ "MalesOnly", b2(malesOnly) }, { "ThroatAxisFit", b2(throatAxisFit) },
+		{ "GuessRigs", b2(guessRigs) }, { "AnyMeshAtLips", b2(anyMeshAtLips) },
+		{ "TeethMove", std::to_string(teethMove) }, { "TeethDown", f2(teethDown) }, { "TeethBack", f2(teethBack) }, { "TeethParts", teethParts },
+		{ "FaceReact", b2(faceReact) }, { "FaceEyes", f2(faceEyes) }, { "FaceBrows", f2(faceBrows) }, { "FaceGag", f2(faceGag) },
+		{ "LipDrag", f2(lipDrag) }, { "LipDragSpeed", f2(lipDragSpeed) },
+		{ "RecoverHold", f2(recoverHold) }, { "RecoverOpen", f2(recoverOpen) }, { "RecoverGulp", b2(recoverGulp) },
+		{ "AutoGagGulp", b2(autoGagGulp) }, { "AutoDeep", f2(autoDeep) }, { "AutoGagSpeed", f2(autoGagSpeed) },
+		{ "AutoGagCooldown", f2(autoGagCooldown) }, { "AutoGulpHold", f2(autoGulpHold) }, { "RaceStrength", raceStrength },
+		{ "CheekGain", f2(cheekGain) }, { "CheekMax", f2(cheekMax) }, { "CheekInner", f2(cheekInner) },
+		{ "GulpSize", f2(gulpSize) }, { "GulpTime", f2(gulpTime) }, { "GagJaw", f2(gagJaw) }, { "GagSqueeze", f2(gagSqueeze) },
+		{ "GagTime", f2(gagTime) }, { "ShapeRidge", f2(shapeRidge) }, { "ShapeKnob", f2(shapeKnob) }, { "LipRound", f2(lipRound) }, { "MouthWideGain", f2(mouthWideGain) },
+		{ "MouthWideMax", f2(mouthWideMax) }, { "CornerOpen", f2(cornerOpen) }, { "ThroatShape", b2(throatShape) }, { "ThroatBand", f2(throatBand) }, { "ThroatFill", f2(throatFill) }, { "ThroatRest", f2(throatRest) },
 		{ "ThroatShapeGain", f2(throatShapeGain) }, { "ThroatShapeMax", f2(throatShapeMax) }, { "ThroatWideUnits", f2(throatWideUnits) },
 		{ "ThroatWideExtra", f2(throatWideExtra) }, { "ThroatDetail", f2(throatDetail) },
 		{ "ThroatMotion", f2(throatMotion) }, { "ThroatMotionLength", f2(throatMotionLen) },
@@ -149,11 +198,82 @@ void Config::save()
 		out << line << "\r\n";
 }
 
+// 0.4.0: "WerewolfBeastRace:0.80, OtherRace:1.20" (race editor IDs, any case)
+static std::string lower(std::string s)
+{
+	for (auto& c : s)
+		c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+	return s;
+}
+
+static std::vector<std::pair<std::string, float>> parseRaces(const std::string& s)
+{
+	std::vector<std::pair<std::string, float>> out;
+	std::size_t i = 0;
+	while (i < s.size()) {
+		std::size_t j = s.find(',', i);
+		if (j == std::string::npos) j = s.size();
+		const std::string item = trim(s.substr(i, j - i));
+		const auto c = item.rfind(':');
+		if (c != std::string::npos) {
+			try { out.emplace_back(trim(item.substr(0, c)), std::stof(item.substr(c + 1))); } catch (...) {}
+		}
+		i = j + 1;
+	}
+	return out;
+}
+
+static std::mutex g_raceLock;   // the menu writes it while the game reads it
+
+float Config::raceStrengthFor(const std::string& a_race) const
+{
+	std::lock_guard lk(g_raceLock);
+	if (raceStrength.empty() || a_race.empty())
+		return 1.0f;
+	const std::string r = lower(a_race);
+	for (auto& [n, k] : parseRaces(raceStrength))
+		if (lower(n) == r)
+			return std::clamp(k, 0.0f, 3.0f);
+	return 1.0f;
+}
+
+void Config::clearRaces()
+{
+	std::lock_guard lk(g_raceLock);
+	raceStrength.clear();
+}
+
+void Config::setRaceStrength(const std::string& a_race, float a_k)
+{
+	std::lock_guard lk(g_raceLock);
+	auto list = parseRaces(raceStrength);
+	bool found = false;
+	for (auto it = list.begin(); it != list.end();) {
+		if (lower(it->first) == lower(a_race)) {
+			found = true;
+			if (std::fabs(a_k - 1.0f) < 0.005f) { it = list.erase(it); continue; }
+			it->second = a_k;
+		}
+		++it;
+	}
+	if (!found && std::fabs(a_k - 1.0f) >= 0.005f)
+		list.emplace_back(a_race, a_k);
+	std::string s;
+	for (auto& [n, k] : list) {
+		char b[96];
+		std::snprintf(b, sizeof(b), "%s%s:%.2f", s.empty() ? "" : ", ", n.c_str(), k);
+		s += b;
+	}
+	raceStrength = s;
+}
+
 void Config::resetDefaults()
 {
 	const int  key = megaKey, mods = megaKeyMods;
 	const bool dbg = debugLog;
+	const std::string races = raceStrength;
 	*this = Config{};
+	raceStrength = races;
 	megaKey = key;
 	megaKeyMods = mods;
 	debugLog = dbg;
