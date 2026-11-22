@@ -64,14 +64,17 @@ namespace
 	// that line (rounded across, like a tube under the skin), DF_Throat1-10 push it 1 unit further out at 100
 	constexpr int         kBands = 10;
 	constexpr int         kFill0 = 6, kBand0 = kFill0 + kBands, kWide0 = kBand0 + kBands;   // 0.3.5: + DF_ThroatWide1-10 (a wide shaft spreads it sideways)
-	constexpr int         kMorphs = kWide0 + kBands;
+	constexpr int         kWideT0 = kWide0 + kBands;   // 0.3.6: + DF_ThroatWideT1-10 (the swelling spread across that width too)
+	constexpr int         kMorphs = kWideT0 + kBands;
 	constexpr const char* kMorphNames[kMorphs] = { "PPA_JawWide", "PPA_LipStretch", "PPA_LipWiden", "PPA_TH1", "PPA_TH2", "PPA_TH3",
 		"DF_ThroatFill1", "DF_ThroatFill2", "DF_ThroatFill3", "DF_ThroatFill4", "DF_ThroatFill5",
 		"DF_ThroatFill6", "DF_ThroatFill7", "DF_ThroatFill8", "DF_ThroatFill9", "DF_ThroatFill10",
 		"DF_Throat1", "DF_Throat2", "DF_Throat3", "DF_Throat4", "DF_Throat5",
 		"DF_Throat6", "DF_Throat7", "DF_Throat8", "DF_Throat9", "DF_Throat10",
 		"DF_ThroatWide1", "DF_ThroatWide2", "DF_ThroatWide3", "DF_ThroatWide4", "DF_ThroatWide5",
-		"DF_ThroatWide6", "DF_ThroatWide7", "DF_ThroatWide8", "DF_ThroatWide9", "DF_ThroatWide10" };
+		"DF_ThroatWide6", "DF_ThroatWide7", "DF_ThroatWide8", "DF_ThroatWide9", "DF_ThroatWide10",
+		"DF_ThroatWideT1", "DF_ThroatWideT2", "DF_ThroatWideT3", "DF_ThroatWideT4", "DF_ThroatWideT5",
+		"DF_ThroatWideT6", "DF_ThroatWideT7", "DF_ThroatWideT8", "DF_ThroatWideT9", "DF_ThroatWideT10" };
 
 	struct Receiver
 	{
@@ -676,10 +679,41 @@ namespace
 					want[kFill0 + k] = here ? 100.0f * cfg.throatFill * reach : 0.0f;
 					raw[k] = here ? std::clamp((rz - cfg.throatRest) * cfg.throatShapeGain, 0.0f, cfg.throatShapeMax) : 0.0f;
 					// wider than it is tall: the bulge spreads sideways (not further out)
-					want[kWide0 + k] = here ? 100.0f * reach * std::clamp((rx - std::max(rz, cfg.throatRest)) / std::max(cfg.throatWideUnits, 0.1f), 0.0f, 1.5f) : 0.0f;
+					want[kWide0 + k] = here ? 100.0f * reach * std::clamp(cfg.throatWideExtra + (rx - std::max(rz, cfg.throatRest)) / std::max(cfg.throatWideUnits, 0.1f), 0.0f, 1.0f) : 0.0f;
+				}
+				// 0.3.5d: the shape stands out - each band's difference from the shaft's usual thickness (the middle value
+				// of the bands it fills) is made ThroatDetail times bigger, so a flare, ring or knot reads clearly
+				{
+					float v[kBands]; int n = 0;
+					for (int k = 0; k < kBands; ++k) if (raw[k] > 0.0f) v[n++] = raw[k];
+					if (n > 0 && cfg.throatDetail != 1.0f) {
+						std::sort(v, v + n);
+						const float mid = v[n / 2];
+						for (int k = 0; k < kBands; ++k)
+							if (raw[k] > 0.0f) raw[k] = std::clamp(mid + (raw[k] - mid) * cfg.throatDetail, 0.0f, cfg.throatShapeMax);
+					}
 				}
 				for (int k = 0; k < kBands; ++k)   // a touch of blur along it, so a sudden step in the shaft is not a shelf
-					want[kBand0 + k] = 100.0f * (0.15f * raw[std::max(k - 1, 0)] + 0.7f * raw[k] + 0.15f * raw[std::min(k + 1, kBands - 1)]);
+					want[kBand0 + k] = 100.0f * (0.1f * raw[std::max(k - 1, 0)] + 0.8f * raw[k] + 0.1f * raw[std::min(k + 1, kBands - 1)]);
+				// 0.3.6: it keeps moving with every stroke, even when the throat is as full as it gets: a soft ripple tied to the
+				// tip (it slides along his throat as the shaft goes in and out), on top of the shape and past its cap
+				if (cfg.throatMotion > 0.0f && tip > 0.0f) {
+					const float lam = std::max(cfg.throatMotionLen, 0.5f);
+					for (int k = 0; k < kBands; ++k) {
+						if (want[kFill0 + k] <= 0.0f)
+							continue;
+						const float s = cfg.throatFrom + (k + 0.5f) * cfg.throatBand;
+						want[kBand0 + k] += 100.0f * cfg.throatMotion * (want[kFill0 + k] / 100.0f) * (0.5f + 0.5f * std::cos(6.2831853f * (s - tip) / lam));
+					}
+				}
+				// 0.3.6: no band more than 0.7 units above its neighbour - a big flare or knot rises over a couple of bands
+				// instead of a spike (the head's mesh is too coarse there for a sudden step)
+				for (int pass = 0; pass < 2; ++pass) {
+					for (int k = 1; k < kBands; ++k) want[kBand0 + k] = std::min(want[kBand0 + k], want[kBand0 + k - 1] + 70.0f);
+					for (int k = kBands - 2; k >= 0; --k) want[kBand0 + k] = std::min(want[kBand0 + k], want[kBand0 + k + 1] + 70.0f);
+				}
+				for (int k = 0; k < kBands; ++k)   // 0.3.6: the swelling spread across the wider tube as well (its width x its height)
+					want[kWideT0 + k] = want[kWide0 + k] / 100.0f * want[kBand0 + k];
 			}
 			const float km = 1.0f - std::exp(-delta * 10.0f);
 			for (int m = 0; m < kMorphs; ++m) {

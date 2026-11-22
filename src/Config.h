@@ -39,9 +39,13 @@ struct Config
 	float throatBand = 0.6f;       // 0.3.5: units of shaft per throat band (10 bands, from ThroatFrom deep)
 	float throatFill = 1.0f;       // 0.3.5: how far out onto the chin-to-seam line his throat fills where the shaft is (0-1)
 	float throatRest = 0.6f;       // 0.3.5: an empty throat takes this much half thickness without bulging
-	float throatShapeGain = 1.0f;  // 0.3.5: units of bulge per unit of shaft thickness past ThroatRest
-	float throatShapeMax = 2.5f;   // 0.3.5: the most a band bulges (units)
+	float throatShapeGain = 1.6f;  // 0.3.5: units of bulge per unit of shaft thickness past ThroatRest
+	float throatShapeMax = 3.0f;   // 0.3.5: the most a band bulges (units)
 	float throatWideUnits = 1.4f;  // 0.3.5: a shaft this much wider than tall (half width) spreads the bulge fully sideways
+	float throatWideExtra = 0.3f;  // 0.3.5: every bulge this much wider anyway (0 = as wide as the shaft, 2 = most of his neck)
+	float throatMotion = 0.4f;     // 0.3.6: a ripple that slides along his throat with every stroke (units; 0 = off)
+	float throatMotionLen = 2.0f;  // 0.3.6: its length along the shaft (units)
+	float throatDetail = 1.6f;     // 0.3.5: a flare / ring / knot this many times more pronounced than the shaft's own
 	bool  teethOpen = true;        // the SMP Head teeth-open modifier (12) while the shaft is in his mouth
 	float lipCloseMax = 2.0f;      // lips may close in this far (round a slim shaft once the jaw is open)
 	float upperLipDown = 0.6f;     // 0.3.3: the upper lip pulled down this far while the mouth is full (the lip morph peaks it up to the nose)
