@@ -679,6 +679,9 @@ namespace
 				float mx = mxLip;
 				if (DeepFit::MouthNow()) {   // 0.2.0: the morphs opened the mouth; the bones fit the lips to the shaft (out, or back in round a slim one)
 					target[i] = sMax > -1e8f ? std::clamp(sMax + cfg.lipMargin + cfg.stretch - sRest - comp[i], DeepFit::MegaMouthNow() ? 0.0f : -cfg.lipCloseMax, mx) : 0.0f;
+					// 0.3.3: the lip-round morph peaks the middle of the upper lip up towards the nose - pull it back down
+					if (spec.kind == Kind::Lip && spec.dir.z > 0.0f && (sMax > -1e8f || inMouth) && cfg.upperLipDown > 0.0f)
+						target[i] -= cfg.upperLipDown * (i == kUpperCenter ? 1.0f : 0.6f);
 				} else {
 					target[i] = sMax > -1e8f ? std::clamp(sMax + cfg.lipMargin + cfg.stretch - sRest, 0.0f, mx) : 0.0f;
 					if (inMouth)

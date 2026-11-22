@@ -56,3 +56,11 @@ In game (0.3.0)
 0.3.2
   The mouth is found again when the face is rebuilt (face paint and overlay changes rebuild it): before, DeepFit kept
   the old mouth bones, frozen where the face once was, and never saw the shaft reach the lips.
+
+0.3.3
+  "Upper lip down" (DeepFit > Mouth, UpperLipDown in DeepFit.ini): while the mouth is full the upper lip is pulled
+  down this far - the lip-round morph peaked its middle up towards the nose.
+  New defaults (tuned in game), each in the middle of its menu slider: the jaw and lips open by the morphs with room
+  round the shaft (MouthExtra 3, JawUnits 10, LipUnits 8, WidenUnits 5, MorphMax 300 - raise Max in
+  MuFacialExpressionExtended.ini to 300 too), the lip bones fit them (upper 1.5, lower 2.2, corners 1.2, close in 2),
+  no throat bone push (the PPA_TH morphs do the throat).

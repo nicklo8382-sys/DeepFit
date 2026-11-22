@@ -62,6 +62,7 @@ void Config::load()
 		else if (k == "ThroatMorphs") bl(throatMorphs);
 		else if (k == "TeethOpen") bl(teethOpen);
 		else if (k == "LipCloseMax") fl(lipCloseMax);
+		else if (k == "UpperLipDown") fl(upperLipDown);
 		else if (k == "NoseFollow") fl(noseFollow);
 		else if (k == "NoseMax") fl(noseMax);
 		else if (k == "ThroatEnabled") bl(throatEnabled);
@@ -91,7 +92,7 @@ void Config::save()
 		{ "MouthMorphs", b2(mouthMorphs) }, { "MegaMouth", b2(megaMouth) }, { "MegaKey", std::to_string(megaKey) }, { "MegaKeyMods", std::to_string(megaKeyMods) },
 		{ "MouthExtra", f2(mouthExtra) }, { "JawUnits", f2(jawUnits) }, { "LipUnits", f2(lipUnits) }, { "WidenUnits", f2(widenUnits) },
 		{ "MorphMax", f2(morphMax) }, { "MorphLerpMs", std::to_string(morphLerpMs) }, { "ThroatMorphs", b2(throatMorphs) },
-		{ "TeethOpen", b2(teethOpen) }, { "LipCloseMax", f2(lipCloseMax) },
+		{ "TeethOpen", b2(teethOpen) }, { "LipCloseMax", f2(lipCloseMax) }, { "UpperLipDown", f2(upperLipDown) },
 	};
 	std::vector<std::string> lines;
 	{

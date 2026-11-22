@@ -59,21 +59,23 @@ namespace DeepFit::Menu
 			Help("Switches Mega mouth on and off in game. Press Set key, then the key - hold Shift, Ctrl and / or Alt with it for a combination (e.g. Alt+Shift+G). The key's switch is not saved; the key is.");
 			ch |= ImGuiMCP::Checkbox("DeepFit opens the mouth", &c.mouthMorphs);
 			Help("DeepFit drives the SMP Head mouth morphs (PPA_JawWide, PPA_LipStretch, PPA_LipWiden, PPA_TH1-3). Off: only the lip bones move, and the morphs are left to PPA or another mod.");
-			ch |= ImGuiMCP::SliderFloat("Room round the shaft", &c.mouthExtra, 0.0f, 3.0f, "%.2f");
+			ch |= ImGuiMCP::SliderFloat("Room round the shaft", &c.mouthExtra, 0.0f, 6.0f, "%.2f");
 			Help("The mouth opens this much more than the shaft is thick.");
-			ch |= ImGuiMCP::SliderFloat("Jaw (units per 100)", &c.jawUnits, 1.0f, 10.0f, "%.1f");
+			ch |= ImGuiMCP::SliderFloat("Jaw (units per 100)", &c.jawUnits, 1.0f, 20.0f, "%.1f");
 			Help("How far the jaw morph at 100 opens the jaw. Lower = the jaw opens wider for the same shaft.");
-			ch |= ImGuiMCP::SliderFloat("Lips round (units per 100)", &c.lipUnits, 1.0f, 8.0f, "%.1f");
-			ch |= ImGuiMCP::SliderFloat("Corners spread (units per 100)", &c.widenUnits, 0.5f, 5.0f, "%.1f");
-			ch |= ImGuiMCP::SliderFloat("Most a morph is set to", &c.morphMax, 10.0f, 300.0f, "%.0f");
+			ch |= ImGuiMCP::SliderFloat("Lips round (units per 100)", &c.lipUnits, 1.0f, 16.0f, "%.1f");
+			ch |= ImGuiMCP::SliderFloat("Corners spread (units per 100)", &c.widenUnits, 0.5f, 10.0f, "%.1f");
+			ch |= ImGuiMCP::SliderFloat("Most a morph is set to", &c.morphMax, 10.0f, 600.0f, "%.0f");
 			Help("MFEE caps the morphs too: its Max in MuFacialExpressionExtended.ini (100 as installed). Raise both for more than the morph's full size.");
 
 			ImGuiMCP::SeparatorText("Lips");
-			ch |= ImGuiMCP::SliderFloat("Stretch past the shaft", &c.stretch, 0.0f, 2.0f, "%.2f");
-			ch |= ImGuiMCP::SliderFloat("Close in round a slim shaft", &c.lipCloseMax, 0.0f, 2.0f, "%.2f");
-			ch |= ImGuiMCP::SliderFloat("Upper lip, at most", &c.upperLipMax, 0.0f, 6.0f, "%.1f");
-			ch |= ImGuiMCP::SliderFloat("Lower lip, at most", &c.lowerLipMax, 0.0f, 8.0f, "%.1f");
-			ch |= ImGuiMCP::SliderFloat("Corners, at most", &c.cornerMax, 0.0f, 5.0f, "%.1f");
+			ch |= ImGuiMCP::SliderFloat("Stretch past the shaft", &c.stretch, -1.0f, 1.0f, "%.2f");
+			ch |= ImGuiMCP::SliderFloat("Close in round a slim shaft", &c.lipCloseMax, 0.0f, 4.0f, "%.2f");
+			ch |= ImGuiMCP::SliderFloat("Upper lip, at most", &c.upperLipMax, 0.0f, 3.0f, "%.1f");
+			ch |= ImGuiMCP::SliderFloat("Upper lip down", &c.upperLipDown, 0.0f, 1.2f, "%.2f");
+			Help("While the mouth is full the upper lip is pulled down this far (its middle fully, the sides a little less) - the lip-round morph peaks it up towards the nose.");
+			ch |= ImGuiMCP::SliderFloat("Lower lip, at most", &c.lowerLipMax, 0.0f, 4.5f, "%.1f");
+			ch |= ImGuiMCP::SliderFloat("Corners, at most", &c.cornerMax, 0.0f, 2.5f, "%.1f");
 
 			ImGuiMCP::SeparatorText("Throat and teeth");
 			ch |= ImGuiMCP::Checkbox("Throat bulge (bones)", &c.throatEnabled);
@@ -88,7 +90,7 @@ namespace DeepFit::Menu
 			ImGuiMCP::Separator();
 			if (ImGuiMCP::Button("Reset to defaults"))
 				c.resetDefaults();
-			Help("Every setting on this page back to as installed (your Mega mouth key and the debug log stay).");
+			Help("Every setting on this page back to as installed (your Mega mouth key and the debug log stay). Each slider's default sits in the middle of its range.");
 			if (ch)
 				c.save();
 		}
