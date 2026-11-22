@@ -52,3 +52,7 @@ In game (0.3.0)
   Mega mouth opens fully as soon as the shaft is in the mouth.
   The Mega mouth key is set by pressing it in the menu, with Shift / Ctrl / Alt if wanted (e.g. Alt+Shift+G).
   "Reset to defaults" on the menu page.
+
+0.3.2
+  The mouth is found again when the face is rebuilt (face paint and overlay changes rebuild it): before, DeepFit kept
+  the old mouth bones, frozen where the face once was, and never saw the shaft reach the lips.

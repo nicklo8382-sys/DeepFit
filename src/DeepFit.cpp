@@ -221,8 +221,20 @@ namespace
 		if (!root)
 			return nullptr;
 		auto& r = g_receivers[actor->GetFormID()];
-		if (r.root == root && r.found > 0)
-			return &r;
+		if (r.root == root && r.found > 0) {
+			// 0.3.2: the face can be rebuilt under the same body (a face paint / overlay change, an expression mod): the lip
+			// bones we kept are then the old, detached ones - frozen where the face once was, ~500 units off in the log -
+			// so the mouth never met the shaft. Still on his head, near it? Then keep them, else look them up again.
+			auto& up = r.bones[kUpperCenter];
+			const bool live = r.head && r.head->parent && up.valid && up.node && up.node->parent && up.node->parent == up.parent.get() &&
+			                  len(up.node->world.translate - r.head->world.translate) < 40.0f;
+			if (live)
+				return &r;
+			if (Config::get().debugLog)
+				logs::info("DeepFit: {:08X}'s face was rebuilt - finding the mouth bones again", actor->GetFormID());
+			r.found = 0;
+			r.checked = false;
+		}
 		if (r.root == root && r.found == 0 && r.checked) {
 			// the facegen head attaches a little after the body 3D: keep looking every 2 s
 			r.retry -= delta;
