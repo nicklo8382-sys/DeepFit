@@ -52,6 +52,7 @@ void Config::load()
 		else if (k == "MouthMorphs") bl(mouthMorphs);
 		else if (k == "MegaMouth") bl(megaMouth);
 		else if (k == "MegaKey") { try { megaKey = std::stoi(v); } catch (...) {} }
+		else if (k == "MegaKeyMods") { try { megaKeyMods = std::stoi(v); } catch (...) {} }
 		else if (k == "MouthExtra") fl(mouthExtra);
 		else if (k == "JawUnits") fl(jawUnits);
 		else if (k == "LipUnits") fl(lipUnits);
@@ -87,7 +88,7 @@ void Config::save()
 		{ "LipMargin", f2(lipMargin) }, { "UpperLipMax", f2(upperLipMax) }, { "LowerLipMax", f2(lowerLipMax) }, { "CornerMax", f2(cornerMax) },
 		{ "Stretch", f2(stretch) }, { "MinOpen", f2(minOpen) }, { "MinCorner", f2(minCorner) },
 		{ "ThroatEnabled", b2(throatEnabled) }, { "ThroatGain", f2(throatGain) }, { "ThroatMax", f2(throatMax) },
-		{ "MouthMorphs", b2(mouthMorphs) }, { "MegaMouth", b2(megaMouth) }, { "MegaKey", std::to_string(megaKey) },
+		{ "MouthMorphs", b2(mouthMorphs) }, { "MegaMouth", b2(megaMouth) }, { "MegaKey", std::to_string(megaKey) }, { "MegaKeyMods", std::to_string(megaKeyMods) },
 		{ "MouthExtra", f2(mouthExtra) }, { "JawUnits", f2(jawUnits) }, { "LipUnits", f2(lipUnits) }, { "WidenUnits", f2(widenUnits) },
 		{ "MorphMax", f2(morphMax) }, { "MorphLerpMs", std::to_string(morphLerpMs) }, { "ThroatMorphs", b2(throatMorphs) },
 		{ "TeethOpen", b2(teethOpen) }, { "LipCloseMax", f2(lipCloseMax) },
@@ -126,4 +127,15 @@ void Config::save()
 	std::ofstream out(path, std::ios::binary | std::ios::trunc);
 	for (auto& line : lines)
 		out << line << "\r\n";
+}
+
+void Config::resetDefaults()
+{
+	const int  key = megaKey, mods = megaKeyMods;
+	const bool dbg = debugLog;
+	*this = Config{};
+	megaKey = key;
+	megaKeyMods = mods;
+	debugLog = dbg;
+	save();
 }

@@ -44,3 +44,11 @@ In game (0.3.0)
   once and saved to DeepFit.ini. "Mega mouth key" sets a key that switches Mega mouth on and off in a scene.
   Other mods: SendModEvent("DeepFit_MegaMouth", "", 1.0) turns Mega mouth on, 0.0 off, -1.0 back to the
   setting; "DeepFit_Mouth" the same for DeepFit opening the mouth at all.
+
+0.3.1
+  Werewolves, Vampire Lords and werebears: their schlongs (on their own bones) now fill the mouth too.
+  When the schlong mesh can't be placed (it read far from where the schlong is), the mouth is fitted round
+  the schlong's bones at the mesh's own thickness instead.
+  Mega mouth opens fully as soon as the shaft is in the mouth.
+  The Mega mouth key is set by pressing it in the menu, with Shift / Ctrl / Alt if wanted (e.g. Alt+Shift+G).
+  "Reset to defaults" on the menu page.

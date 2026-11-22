@@ -1,5 +1,6 @@
 #include "DeepFit.h"
 #include "Config.h"
+#include <iterator>
 
 // ---------------------------------------------------------------------------------------------
 // DeepFit
@@ -103,8 +104,38 @@ namespace
 		bool                    skinnedThisFrame = false;
 		int                     looked = 0, genital = 0;  // last scan, for the log
 		bool                    told = false;
+		// 0.3.1: his schlong's bone line (base to tip) and its thickness. The mesh skinned on the CPU landed far from where
+		// the schlong really is in some games (140 units off, so the mouth never found it): each frame the skinned points
+		// are checked against the bone line, and when they are off the shaft is built round the bones instead
+		std::vector<NiPointer<NiAVObject>> chain;
+		float                   radius = 1.6f;
+		int                     method = -1;   // 0 the mesh, 1 the bone line (last frame), for the log
+		float                   meshOff = 0.0f;
 	};
 
+	// his schlong's bones, base to tip
+	std::vector<NiPointer<NiAVObject>> findChain(NiAVObject* root)
+	{
+		static const std::vector<std::vector<const char*>> kChains{
+			{ "NPC Genitals01 [Gen01]", "NPC Genitals02 [Gen02]", "NPC Genitals03 [Gen03]", "NPC Genitals04 [Gen04]", "NPC Genitals05 [Gen05]", "NPC Genitals06 [Gen06]" },
+			{ "WWD 2", "WWD 3", "WWD 4", "WWD 5", "WWD 6", "WWD 7", "WWD 8", "WWD 9" },
+			{ "VLDick02", "VLDick03", "VLDick04", "VLDick05", "VLDick06" },
+			{ "BearD 4", "BearD 5", "BearD 6", "BearD 7", "BearD 8", "BearD 9" }
+		};
+		std::vector<NiPointer<NiAVObject>> best;
+		for (auto& names : kChains) {   // the beast chains win over the human bones a beast skeleton also carries (unused)
+			std::vector<NiPointer<NiAVObject>> c;
+			for (auto* n : names)
+				if (auto* o = root->GetObjectByName(n))
+					c.emplace_back(o);
+			if (c.size() >= 3 && (best.empty() || names[0][0] != 'N'))
+				best = std::move(c);
+		}
+		return best;
+	}
+
+	std::atomic<bool>                    g_capture{ false };   // 0.3.1: the menu waits for the Mega mouth key
+	int                                  g_mods = 0;           // Shift 1 / Ctrl 2 / Alt 4 held now
 	std::unordered_map<FormID, Receiver> g_receivers;
 	std::unordered_map<FormID, Partner>  g_partners;
 	float                                g_logTimer = 0.0f;
@@ -161,8 +192,11 @@ namespace
 		if (!name)
 			return false;
 		std::string_view n(name);
-		// "NPC Genitals01 [Gen01]" ... "NPC Genitals06 [Gen06]"
-		return n.find("NPC Genitals0") != std::string_view::npos && n.find("Scrotum") == std::string_view::npos;
+		// "NPC Genitals01 [Gen01]" ... "NPC Genitals06 [Gen06]"; 0.3.1: a werewolf's (WWD 2-9), a Vampire Lord's (VLDick02-06)
+		// and a werebear's (BearD 4-9) hang on their own bones
+		if (n.find("Scrotum") != std::string_view::npos)
+			return false;
+		return n.find("NPC Genitals0") != std::string_view::npos || n.starts_with("WWD ") || n.starts_with("VLDick") || n.starts_with("BearD ");
 	}
 
 	template <class F>
@@ -243,6 +277,7 @@ namespace
 		p.looked = p.genital = 0;
 		p.root = root;
 		p.age = 0.0f;
+		p.chain = findChain(root);
 		traverse(root, [&](NiAVObject* o) {
 			auto* geom = o->AsGeometry();
 			if (!geom)
@@ -320,6 +355,68 @@ namespace
 			if (!shape.verts.empty())
 				p.shapes.push_back(std::move(shape));
 		});
+		// 0.3.1: his thickness, from the mesh itself (skin space: no bones needed): the spread of the shaft vertices round
+		// the line through them, the outer part (a few inner ones do not shrink it)
+		std::vector<NiPoint3> all;
+		for (auto& sh : p.shapes)
+			for (auto& v : sh.verts)
+				all.push_back(v.skinPos);
+		const bool beast = !p.chain.empty() && p.chain[0]->name.c_str()[0] != 'N';
+		p.radius = beast ? 2.5f : 1.6f;
+		if (all.size() >= 30) {
+			NiPoint3 c(0, 0, 0);
+			for (auto& v : all) c += v;
+			c = c * (1.0f / static_cast<float>(all.size()));
+			NiPoint3 a = all[0], b = all[0];   // its length: the two vertices farthest apart (two passes)
+			float    d = -1.0f;
+			for (auto& v : all) if (len(v - c) > d) { d = len(v - c); a = v; }
+			d = -1.0f;
+			for (auto& v : all) if (len(v - a) > d) { d = len(v - a); b = v; }
+			const NiPoint3 ax = norm(b - a);
+			std::vector<float> r;
+			for (auto& v : all) {
+				NiPoint3 q = v - c;
+				q = q - ax * dot(q, ax);
+				r.push_back(len(q));
+			}
+			std::sort(r.begin(), r.end());
+			const float m = r[r.size() * 7 / 10];
+			if (m > 0.4f && m < 8.0f)
+				p.radius = m;
+		}
+	}
+
+	// 0.3.1: the shaft as a tube round his bone line (base to tip, the tip a little past the last bone)
+	void tubePoints(const Partner& p, std::vector<NiPoint3>& out)
+	{
+		std::vector<NiPoint3> b;
+		for (auto& n : p.chain)
+			if (n) b.push_back(n->world.translate);
+		if (b.size() < 2)
+			return;
+		const NiPoint3 last = b.back() - b[b.size() - 2];
+		b.push_back(b.back() + norm(last) * std::min(1.5f, len(last) + 0.5f));
+		for (std::size_t i = 0; i + 1 < b.size(); ++i) {
+			const NiPoint3 d = b[i + 1] - b[i];
+			const float    L = len(d);
+			if (L < 1e-3f)
+				continue;
+			const NiPoint3 ax = d * (1.0f / L);
+			NiPoint3       u = std::fabs(ax.z) < 0.9f ? NiPoint3(0, 0, 1) : NiPoint3(1, 0, 0);
+			u = norm(u - ax * dot(u, ax));
+			const NiPoint3 v(ax.y * u.z - ax.z * u.y, ax.z * u.x - ax.x * u.z, ax.x * u.y - ax.y * u.x);
+			const int      steps = std::max(1, static_cast<int>(L / 0.4f));
+			for (int s = 0; s < steps; ++s) {
+				const float    t = static_cast<float>(s) / static_cast<float>(steps);
+				const bool     tip = i + 2 == b.size();
+				const float    r = p.radius * (tip ? 1.0f - 0.5f * t : 1.0f);
+				const NiPoint3 c = b[i] + d * t;
+				for (int k = 0; k < 12; ++k) {
+					const float a = 0.5235988f * static_cast<float>(k);
+					out.push_back(c + u * (std::cos(a) * r) + v * (std::sin(a) * r));
+				}
+			}
+		}
 	}
 
 	Partner* getPartner(Actor* actor, float delta)
@@ -338,7 +435,7 @@ namespace
 					actor->GetFormID(), actor->GetDisplayFullName(), p.shapes.size(), p.looked, p.genital);
 			}
 		}
-		return p.shapes.empty() ? nullptr : &p;
+		return (p.shapes.empty() && p.chain.size() < 2) ? nullptr : &p;
 	}
 
 	void skinPartner(Partner& p)
@@ -380,6 +477,37 @@ namespace
 				if (wt > 0.0f)
 					p.world.emplace_back(acc.x / wt, acc.y / wt, acc.z / wt);
 			}
+		}
+		// 0.3.1: are the skinned points where his schlong is? (median distance to his bone line)
+		if (p.chain.size() >= 2) {
+			std::vector<float> dd;
+			const std::size_t step = std::max<std::size_t>(1, p.world.size() / 60);
+			for (std::size_t i = 0; i < p.world.size(); i += step) {
+				float best = 1e9f;
+				for (std::size_t k = 0; k + 1 < p.chain.size(); ++k) {
+					const NiPoint3 a = p.chain[k]->world.translate, b = p.chain[k + 1]->world.translate, ab = b - a;
+					const float    l2 = dot(ab, ab);
+					const float    t = l2 > 1e-6f ? std::clamp(dot(p.world[i] - a, ab) / l2, 0.0f, 1.0f) : 0.0f;
+					best = std::min(best, len(p.world[i] - (a + ab * t)));
+				}
+				dd.push_back(best);
+			}
+			float off = 1e9f;
+			if (!dd.empty()) {
+				std::nth_element(dd.begin(), dd.begin() + dd.size() / 2, dd.end());
+				off = dd[dd.size() / 2];
+			}
+			const int method = off < p.radius * 2.0f + 3.0f ? 0 : 1;
+			if (method == 1) {
+				p.world.clear();
+				tubePoints(p, p.world);
+			}
+			if (method != p.method && Config::get().debugLog)
+				logs::info("DeepFit: shaft from {} ({} points, thickness {:.1f} across; the skinned mesh sits {:.1f} from his bones){}",
+					method == 0 ? "his mesh" : "his bone line", p.world.size(), p.radius * 2.0f, off < 1e8f ? off : -1.0f,
+					method == 1 ? " - the mesh reads wrong here, the bones are used" : "");
+			p.method = method;
+			p.meshOff = off;
 		}
 	}
 
@@ -466,7 +594,7 @@ namespace
 			const float width = through ? xR - xL : 0.0f;
 			const float restWidth = (r.bones[6].valid && r.bones[7].valid) ? len(rest[7] - rest[6]) : 4.0f;
 			float want[kMorphs] = {};
-			if (through) {
+			if (through || (inMouth && DeepFit::MegaMouthNow())) {   // 0.3.1: Mega mouth opens fully as soon as it is in his mouth
 				const float open = height + cfg.mouthExtra;
 				want[0] = DeepFit::MegaMouthNow() ? cfg.morphMax : open / std::max(cfg.jawUnits, 0.1f) * 100.0f;
 				want[1] = DeepFit::MegaMouthNow() ? cfg.morphMax : open * 0.5f / std::max(cfg.lipUnits, 0.1f) * 100.0f;
@@ -697,11 +825,32 @@ namespace
 		}
 		BSEventNotifyControl ProcessEvent(InputEvent* const* a_events, BSTEventSource<InputEvent*>*) override
 		{
-			// 0.3.0: the Mega mouth key
-			if (const int key = Config::get().megaKey; key > 0 && a_events) {
+			// 0.3.0: the Mega mouth key (0.3.1: a combination - Shift / Ctrl / Alt held with it - and set in the menu by pressing it)
+			if (a_events) {
 				for (auto* e = *a_events; e; e = e->next) {
 					auto* b = e->AsButtonEvent();
-					if (!b || b->GetDevice() != INPUT_DEVICE::kKeyboard || static_cast<int>(b->GetIDCode()) != key || !b->IsDown())
+					if (!b || b->GetDevice() != INPUT_DEVICE::kKeyboard)
+						continue;
+					const int code = static_cast<int>(b->GetIDCode());
+					const int mod = (code == 42 || code == 54) ? 1 : (code == 29 || code == 157) ? 2 : (code == 56 || code == 184) ? 4 : 0;
+					if (mod) {
+						if (b->IsPressed()) g_mods |= mod; else g_mods &= ~mod;
+						continue;
+					}
+					if (!b->IsDown())
+						continue;
+					auto& cfg = Config::get();
+					if (g_capture) {
+						g_capture = false;
+						if (code != 1) {   // Esc: leave it as it was
+							cfg.megaKey = code;
+							cfg.megaKeyMods = g_mods;
+							cfg.save();
+							logs::info("DeepFit: Mega mouth key set to {}", DeepFit::KeyText(code, g_mods));
+						}
+						continue;
+					}
+					if (cfg.megaKey <= 0 || code != cfg.megaKey || g_mods != cfg.megaKeyMods)
 						continue;
 					auto* ui = UI::GetSingleton();
 					// (no typing check: CommonLibSSE-NG 3.7 has no ControlMap::GetRuntimeData; the console and paused menus cover it)
@@ -830,4 +979,42 @@ void DeepFit::OnFrame(float delta)
 	}
 	if (g_logTimer > 1.0f)
 		g_logTimer = 0.0f;
+}
+
+void DeepFit::CaptureKey(bool a_on) { g_capture = a_on; }
+bool DeepFit::CapturingKey() { return g_capture; }
+const char* DeepFit::KeyText(int a_code, int a_mods)
+{
+	static std::string out;
+	if (a_code <= 0)
+		return "none";
+	static const char* kNames[] = {
+		"?", "Esc", "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "-", "=", "Backspace", "Tab",
+		"Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P", "[", "]", "Enter", "Ctrl", "A", "S",
+		"D", "F", "G", "H", "J", "K", "L", ";", "'", "`", "Shift", "\\", "Z", "X", "C", "V",
+		"B", "N", "M", ",", ".", "/", "Shift", "Num *", "Alt", "Space", "Caps Lock", "F1", "F2", "F3", "F4", "F5",
+		"F6", "F7", "F8", "F9", "F10", "Num Lock", "Scroll Lock", "Num 7", "Num 8", "Num 9", "Num -", "Num 4", "Num 5", "Num 6", "Num +", "Num 1",
+		"Num 2", "Num 3", "Num 0", "Num ."
+	};
+	std::string k;
+	if (a_code < static_cast<int>(std::size(kNames))) k = kNames[a_code];
+	else if (a_code == 87) k = "F11";
+	else if (a_code == 88) k = "F12";
+	else if (a_code == 199) k = "Home";
+	else if (a_code == 200) k = "Up";
+	else if (a_code == 201) k = "Page Up";
+	else if (a_code == 203) k = "Left";
+	else if (a_code == 205) k = "Right";
+	else if (a_code == 207) k = "End";
+	else if (a_code == 208) k = "Down";
+	else if (a_code == 209) k = "Page Down";
+	else if (a_code == 210) k = "Insert";
+	else if (a_code == 211) k = "Delete";
+	else k = "key " + std::to_string(a_code);
+	out.clear();
+	if (a_mods & 2) out += "Ctrl+";
+	if (a_mods & 1) out += "Shift+";
+	if (a_mods & 4) out += "Alt+";
+	out += k;
+	return out.c_str();
 }

@@ -1,6 +1,7 @@
 #include "Menu.h"
 #include "Config.h"
 #include "SKSEMenuFramework.h"
+#include "DeepFit.h"
 
 // 0.3.0: DeepFit's page in the SKSE Menu Framework. Every change takes effect at once (the next frame) and is written
 // back to DeepFit.ini, so it is there after a restart too.
@@ -40,8 +41,22 @@ namespace DeepFit::Menu
 			ImGuiMCP::SeparatorText("Mouth");
 			ch |= ImGuiMCP::Checkbox("Mega mouth", &c.megaMouth);
 			Help("As wide as the mouth morphs go, whatever the shaft. Off: the mouth opens to the shaft's own thickness where it passes the lips, and closes again round a slimmer part.");
-			ch |= ImGuiMCP::SliderInt("Mega mouth key", &c.megaKey, 0, 255, c.megaKey > 0 ? "%d" : "none");
-			Help("A key that switches Mega mouth on and off in game (DirectInput scan code: e.g. 49 = N, 50 = M, 199 = Home). 0 = no key. The key's switch is not saved; this box is.");
+			// 0.3.1: the key set by pressing it (with Shift / Ctrl / Alt if wanted)
+			if (DeepFit::CapturingKey()) {
+				ImGuiMCP::Text("Mega mouth key: press the key now (Esc to cancel)");
+			} else {
+				ImGuiMCP::Text("Mega mouth key: %s", DeepFit::KeyText(c.megaKey, c.megaKeyMods));
+				ImGuiMCP::SameLine();
+				if (ImGuiMCP::Button("Set key"))
+					DeepFit::CaptureKey(true);
+				ImGuiMCP::SameLine();
+				if (ImGuiMCP::Button("No key")) {
+					c.megaKey = 0;
+					c.megaKeyMods = 0;
+					ch = true;
+				}
+			}
+			Help("Switches Mega mouth on and off in game. Press Set key, then the key - hold Shift, Ctrl and / or Alt with it for a combination (e.g. Alt+Shift+G). The key's switch is not saved; the key is.");
 			ch |= ImGuiMCP::Checkbox("DeepFit opens the mouth", &c.mouthMorphs);
 			Help("DeepFit drives the SMP Head mouth morphs (PPA_JawWide, PPA_LipStretch, PPA_LipWiden, PPA_TH1-3). Off: only the lip bones move, and the morphs are left to PPA or another mod.");
 			ch |= ImGuiMCP::SliderFloat("Room round the shaft", &c.mouthExtra, 0.0f, 3.0f, "%.2f");
@@ -70,6 +85,10 @@ namespace DeepFit::Menu
 			ImGuiMCP::TextWrapped("Other mods can switch Mega mouth with a mod event: SendModEvent(\"DeepFit_MegaMouth\", \"\", 1.0) on, 0.0 off, -1.0 back to the setting here. "
 								  "\"DeepFit_Mouth\" the same for DeepFit opening the mouth at all.");
 			ch |= ImGuiMCP::Checkbox("Debug log", &c.debugLog);
+			ImGuiMCP::Separator();
+			if (ImGuiMCP::Button("Reset to defaults"))
+				c.resetDefaults();
+			Help("Every setting on this page back to as installed (your Mega mouth key and the debug log stay).");
 			if (ch)
 				c.save();
 		}
