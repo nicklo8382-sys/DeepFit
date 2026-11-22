@@ -134,6 +134,8 @@ namespace
 		bool                   tiltSet = false;          // 0.4.1: the test page's head tilt
 		NiMatrix3              tiltBase, tiltLast;
 		bool                   teethTold = false;
+		bool                   axesOk = false;
+		bool                   inScene = false;    // 0.4.2: a partner's schlong near him this frame (in a scene)   // 0.4.2: fx/fy/fz found from his mouth (until then his head bone's axes)
 	};
 
 	struct ShaftVert
@@ -478,6 +480,19 @@ namespace
 				}
 			}
 			++p.looked;
+			// 0.4.2: a hidden part is not his schlong as it is drawn - at the start of a scene a hidden copy (the soft one, or
+			// one about to be swapped out) was read and his schlong was taken to be 17 units below where it showed, so the
+			// mouth never opened until the scene was started again
+			if (any) {
+				for (NiAVObject* up = geom; up && up != root->parent; up = up->parent) {
+					if (up->GetAppCulled()) {
+						any = false;
+						if (Config::get().debugLog)
+							logs::info("DeepFit: {} is hidden - not read as his schlong", geom->name.c_str() ? geom->name.c_str() : "?");
+						break;
+					}
+				}
+			}
 			if (!any && p.anyMesh) {   // 0.4.0: nothing recognisable at all - every part of him counts (DeepFit keeps what is at his lips)
 				if (sp->vertexCount > 20000)
 					return;
@@ -535,8 +550,11 @@ namespace
 				}
 				shape.verts.push_back(sv);
 			}
-			if (!shape.verts.empty())
+			if (!shape.verts.empty()) {
+				if (Config::get().debugLog)   // 0.4.2: which parts of him are read
+					logs::info("DeepFit: reading {} ({} of its {} vertices)", geom->name.c_str() ? geom->name.c_str() : "?", shape.verts.size(), sp->vertexCount);
 				p.shapes.push_back(std::move(shape));
+			}
 		});
 		// 0.3.1: his thickness, from the mesh itself (skin space: no bones needed): the spread of the shaft vertices round
 		// the line through them, the outer part (a few inner ones do not shrink it)
@@ -772,6 +790,7 @@ namespace
 			r.fx = X;
 			r.fy = Y;
 			r.fz = Z;
+			r.axesOk = true;
 			if (cfg.debugLog && !r.toldFrame) {
 				r.toldFrame = true;
 				const NiPoint3 hx = norm(H.rotate * NiPoint3(1, 0, 0)), hy = norm(H.rotate * NiPoint3(0, 1, 0)), hz = norm(H.rotate * NiPoint3(0, 0, 1));
@@ -1426,14 +1445,16 @@ namespace
 	void updateTeeth(Receiver& r, Actor* act, float delta)
 	{
 		auto& cfg = Config::get();
-		const bool wantOn = cfg.teethMove == 2 || (cfg.teethMove == 1 && r.full);
+		// 0.4.2: only in a scene - 1 while his mouth is full, 2 while a partner's schlong is near him; otherwise they go
+		// back to his head bone exactly as the game has them
+		const bool wantOn = (cfg.teethMove == 2 && r.inScene) || (cfg.teethMove == 1 && r.full);
 		const float to = wantOn ? 1.0f : 0.0f;
 		r.teethK += (to - r.teethK) * (1.0f - std::exp(-delta * 6.0f));
 		if (std::fabs(r.teethK - to) < 1e-3f)
 			r.teethK = to;
 		const bool moving = cfg.teethMove > 0 && (std::fabs(cfg.teethDown) > 1e-3f || std::fabs(cfg.teethBack) > 1e-3f);
 		if (!moving || (r.teethK == 0.0f && !wantOn)) {
-			if (!r.teethHooks.empty() && (!moving || cfg.teethMove == 0)) {   // switched off: back on his head bone
+			if (!r.teethHooks.empty()) {   // not in use: back on his head bone, exactly where the game puts them
 				for (auto& h : r.teethHooks) {
 					auto* si = h.geo ? h.geo->GetGeometryRuntimeData().skinInstance.get() : nullptr;
 					if (si && si->bones && h.idx < si->skinData->bones && si->bones[h.idx] == r.teethNode.get() && h.orig) {
@@ -1443,8 +1464,11 @@ namespace
 				}
 				r.teethHooks.clear();
 			}
-			if (r.teethNode)
+			if (r.teethNode) {
 				r.teethNode->local.translate = NiPoint3(0, 0, 0);
+				if (r.teethNode->parent)   // 0.4.2: it follows his head again at once (not left where it last was)
+					r.teethNode->world = r.teethNode->parent->world * r.teethNode->local;
+			}
 			return;
 		}
 		auto* root = act->Get3D(false);
@@ -1458,6 +1482,10 @@ namespace
 			r.teethNode = NiPointer<NiNode>(NiNode::Create(0));
 			r.teethNode->name = "DeepFit Teeth";
 			r.teethNode->local = NiTransform();
+			// 0.4.2: the game updates it with his skeleton every frame (a node made without these was only ever moved
+			// by DeepFit - between DeepFit's updates it stayed where it was, and his teeth hung outside his head)
+			r.teethNode->GetFlags().set(NiAVObject::Flag::kSelectiveUpdate, NiAVObject::Flag::kSelectiveUpdateTransforms,
+				NiAVObject::Flag::kSelectiveUpdateController);
 			headNode->AttachChild(r.teethNode.get(), true);
 			r.teethScan = 0.0f;
 		}
@@ -1496,9 +1524,11 @@ namespace
 						continue;
 					if (b == r.teethNode.get())
 						continue;   // still ours
-					if (b != r.head.get() && std::string_view(b->name.c_str() ? b->name.c_str() : "") != "NPC Head [Head]")
+					const std::string_view bn(b->name.c_str() ? b->name.c_str() : "");
+					const bool stale = bn == "DeepFit Teeth";   // 0.4.2: hung on an older node of ours (his face found again since)
+					if (!stale && b != r.head.get() && bn != "NPC Head [Head]")
 						continue;   // only what hangs on his head bone
-					r.teethHooks.push_back({ NiPointer<BSGeometry>(geo), i, NiPointer<NiAVObject>(b) });
+					r.teethHooks.push_back({ NiPointer<BSGeometry>(geo), i, NiPointer<NiAVObject>(stale ? r.head.get() : b) });
 					si->bones[i] = r.teethNode.get();
 					si->boneWorldTransforms[i] = &r.teethNode->world;
 				}
@@ -1511,8 +1541,9 @@ namespace
 			}
 		}
 		// down and back in his face's own axes, as his head bone's local offset
-		const NiPoint3 offWorld = (r.fz * -cfg.teethDown + r.fy * -cfg.teethBack) * r.teethK;
 		const NiTransform& H = r.head->world;
+		const NiPoint3 fy = r.axesOk ? r.fy : norm(H.rotate * NiPoint3(0, 1, 0)), fz = r.axesOk ? r.fz : norm(H.rotate * NiPoint3(0, 0, 1));
+		const NiPoint3 offWorld = (fz * -cfg.teethDown + fy * -cfg.teethBack) * r.teethK;
 		NiPoint3 off = H.rotate.Transpose() * offWorld;
 		if (H.scale > 1e-6f)
 			off = off * (1.0f / H.scale);
@@ -1590,14 +1621,27 @@ namespace
 		}
 		if (!g_testLoadTried) {
 			g_testLoadTried = true;
+			// 0.4.2: tried with and without "meshes\\" in front (the model database wants the full path), and the error said
 			BSModelDB::DBTraits::ArgsType args{};
+			auto load = [&](const char* name, NiPointer<NiNode>& out) {
+				int e1 = -1, e2 = -1;
+				for (const char* pre : { "meshes\\", "Meshes\\", "" }) {
+					const std::string path = std::string(pre) + name;
+					out.reset();
+					const auto e = BSModelDB::Demand(path.c_str(), out, args);
+					if (e == BSResource::ErrorCode::kNone && out)
+						return true;
+					(e1 < 0 ? e1 : e2) = static_cast<int>(e);
+				}
+				logs::warn("DeepFit: the test schlong's mesh meshes\\{} did not load (errors {} / {})", name, e1, e2);
+				return false;
+			};
 			NiPointer<NiNode> a, b;
-			if (BSModelDB::Demand("DeepFit\\TestShaft.nif", a, args) == BSResource::ErrorCode::kNone && a &&
-				BSModelDB::Demand("DeepFit\\TestShaftTip.nif", b, args) == BSResource::ErrorCode::kNone && b) {
+			if (load("DeepFit\\TestShaft.nif", a) && load("DeepFit\\TestShaftTip.nif", b)) {
 				g_testSeg = a;
 				g_testTip = b;
-			} else
-				logs::warn("DeepFit: the test schlong's meshes (meshes\\DeepFit\\TestShaft*.nif) did not load");
+				logs::info("DeepFit: the test schlong's meshes loaded");
+			}
 		}
 		if (!g_testSeg || !g_testTip)
 			return;
@@ -1607,6 +1651,8 @@ namespace
 		if (!g_testRoot) {
 			g_testRoot = NiPointer<NiNode>(NiNode::Create(0));
 			g_testRoot->name = "DeepFit TestShaft";
+			g_testRoot->GetFlags().set(NiAVObject::Flag::kSelectiveUpdate, NiAVObject::Flag::kSelectiveUpdateTransforms,
+				NiAVObject::Flag::kSelectiveUpdateController);   // 0.4.2: moves with his head every frame
 			if (auto* t = static_cast<NiAVObject*>(g_testTip->Clone())) {
 				g_testTipPiece = NiPointer<NiAVObject>(t);
 				g_testRoot->AttachChild(t, true);
@@ -1675,39 +1721,51 @@ namespace
 		g_testRoot->Update(ud);
 	}
 
-	// 0.4.1: the test page tilts the player's head back (chin up) so his throat is easier to see. The animation sets the
-	// head every frame; when it has not this frame (still what we set), the tilt starts from what it was before ours.
-	void tiltHead(Receiver& r, float deg)
+	// 0.4.1: the test page tilts the player's head back (chin up) so his throat is easier to see.
+	// 0.4.2: done in the game's own animation update, right after it poses him (DeepFit's frame task ran at another point
+	// of the frame, so some frames were drawn with the tilt and some without - his head jittered up and down)
+	std::atomic<float> g_tiltDeg{ 0.0f };
+
+	void tiltNow(Actor* a, float deg)
 	{
-		auto* h = r.head.get();
+		auto* root = a ? a->Get3D(false) : nullptr;
+		auto* h = root ? root->GetObjectByName("NPC Head [Head]") : nullptr;
 		auto* par = h ? h->parent : nullptr;
 		if (!par)
 			return;
-		auto same = [](const NiMatrix3& a, const NiMatrix3& b) { return std::memcmp(&a, &b, sizeof(NiMatrix3)) == 0; };
-		if (r.tiltSet && same(h->local.rotate, r.tiltLast))
-			h->local.rotate = r.tiltBase;
-		if (deg <= 0.01f) {
-			if (r.tiltSet) {
-				r.tiltSet = false;
-				NiUpdateData ud{};
-				h->Update(ud);
-			}
+		const NiMatrix3 world = par->world.rotate * h->local.rotate;
+		NiPoint3        u(world.entry[0][0], world.entry[1][0], world.entry[2][0]);   // his head's own right
+		const float     lu = len(u);
+		if (lu < 1e-4f)
 			return;
-		}
-		r.tiltBase = h->local.rotate;
-		const float    a = deg * 0.01745329f, c = std::cos(a), s = std::sin(a), t = 1.0f - c;
-		const NiPoint3 u = r.fx;   // about his right: forward turns up
-		NiMatrix3      R;
+		u = u * (1.0f / lu);
+		const float a2 = deg * 0.01745329f, c = std::cos(a2), s = std::sin(a2), t = 1.0f - c;
+		NiMatrix3   R;
 		R.entry[0][0] = c + u.x * u.x * t;       R.entry[0][1] = u.x * u.y * t - u.z * s; R.entry[0][2] = u.x * u.z * t + u.y * s;
 		R.entry[1][0] = u.y * u.x * t + u.z * s; R.entry[1][1] = c + u.y * u.y * t;       R.entry[1][2] = u.y * u.z * t - u.x * s;
 		R.entry[2][0] = u.z * u.x * t - u.y * s; R.entry[2][1] = u.z * u.y * t + u.x * s; R.entry[2][2] = c + u.z * u.z * t;
-		const NiMatrix3 world = par->world.rotate * h->local.rotate;
 		h->local.rotate = par->world.rotate.Transpose() * (R * world);
-		r.tiltLast = h->local.rotate;
-		r.tiltSet = true;
 		NiUpdateData ud{};
 		h->Update(ud);
 	}
+
+	struct AnimHook
+	{
+		static void Player(PlayerCharacter* a, float dt)
+		{
+			g_playerAnim(a, dt);
+			const float deg = g_tiltDeg.load(std::memory_order_relaxed);
+			if (a && deg > 0.01f)
+				tiltNow(a, deg);
+		}
+		static inline REL::Relocation<decltype(Player)> g_playerAnim;
+		static void Install()
+		{
+			REL::Relocation<std::uintptr_t> vp{ PlayerCharacter::VTABLE[0] };
+			g_playerAnim = vp.write_vfunc(0x7D, Player);
+			logs::info("DeepFit: hooked the player's animation update (the test page's head tilt)");
+		}
+	};
 
 	// 0.4.0: what DeepFit found, for the menu
 	struct StatusData
@@ -1816,6 +1874,11 @@ void DeepFit::Install()
 			events = true;
 		}
 	}
+	static bool hooked = false;
+	if (!hooked) {
+		hooked = true;
+		AnimHook::Install();
+	}
 	static bool done = false;
 	if (done)
 		return;
@@ -1835,6 +1898,7 @@ void DeepFit::OnFrame(float delta)
 		delta = 1.0f / 60.0f;
 	g_logTimer += delta;
 	g_clock += delta;
+	g_tiltDeg = g_preview.on ? std::clamp(g_preview.tilt, 0.0f, 60.0f) : 0.0f;   // 0.4.2: applied in the animation update
 	if (!g_preview.on)
 		hideTestShaft();
 	if (g_tngAsk.exchange(false))
@@ -1896,8 +1960,7 @@ void DeepFit::OnFrame(float delta)
 		}
 		r->raceK = main ? cfg.raceStrengthFor(raceId) : 1.0f;
 		nShaft += static_cast<int>(shaft.size());
-		if (recv->IsPlayerRef() && (g_preview.on || r->tiltSet))
-			tiltHead(*r, g_preview.on ? g_preview.tilt : 0.0f);   // 0.4.1
+		r->inScene = !shaft.empty() || (g_preview.on && recv->IsPlayerRef());
 		if (g_preview.on && recv->IsPlayerRef())
 			solve(*r, shaft, delta, true);   // 0.4.0: the test page
 		else if (shaft.empty())

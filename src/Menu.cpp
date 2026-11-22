@@ -68,24 +68,118 @@ namespace DeepFit::Menu
 			}
 		}
 
+		// 0.4.1: MFEE's Max (MuFacialExpressionExtended.ini) - read, and written by the button
+		constexpr const char* kMfeeIni = "Data/SKSE/Plugins/MuFacialExpressionExtended.ini";
+		bool  g_mfeeChanged = false;
+		float g_mfeeMax = -1.0f;
+		bool  g_mfeeRead = false;
+
+		float MfeeMax()
+		{
+			if (g_mfeeRead)
+				return g_mfeeMax;
+			g_mfeeRead = true;
+			std::ifstream in(kMfeeIni);
+			std::string   line;
+			while (std::getline(in, line)) {
+				auto t = line.find_first_not_of(" \t");
+				if (t == std::string::npos || line.compare(t, 3, "Max") != 0)
+					continue;
+				const auto eq = line.find('=');
+				if (eq == std::string::npos)
+					continue;
+				try { g_mfeeMax = std::stof(line.substr(eq + 1)); } catch (...) {}
+				break;
+			}
+			return g_mfeeMax;
+		}
+
+		void SetMfeeMax(float v)
+		{
+			std::vector<std::string> lines;
+			{
+				std::ifstream in(kMfeeIni, std::ios::binary);
+				std::string   line;
+				while (std::getline(in, line)) {
+					if (!line.empty() && line.back() == '\r')
+						line.pop_back();
+					lines.push_back(line);
+				}
+			}
+			if (lines.empty())
+				return;
+			bool done = false;
+			for (auto& l : lines) {
+				auto t = l.find_first_not_of(" \t");
+				if (!done && t != std::string::npos && l.compare(t, 3, "Max") == 0 && l.find('=') != std::string::npos) {
+					char b[48];
+					std::snprintf(b, sizeof(b), "Max = %.1f", v);
+					l = b;
+					done = true;
+				}
+			}
+			if (!done)
+				return;
+			std::ofstream out(kMfeeIni, std::ios::binary | std::ios::trunc);
+			for (auto& l : lines)
+				out << l << "\r\n";
+			g_mfeeChanged = true;
+			g_mfeeRead = false;
+			logs::info("DeepFit: MFEE's Max set to {:.0f} in its ini (after a restart)", v);
+		}
+
 		bool Check(const char* label, bool* v) { return ImGuiMCP::Checkbox(T(label), v); }
 		bool Slider(const char* label, float* v, float lo, float hi, const char* fmt) { return ImGuiMCP::SliderFloat(T(label), v, lo, hi, T(fmt)); }
 		void Section(const char* t) { ImGuiMCP::SeparatorText(T(t)); }
 
-		// 0.4.0: presets - the throat and mouth sliders set together
+		// 0.4.0: presets - the throat and mouth sliders set together.
+		// 0.4.2: Default is Nick's tuned set; Subtle is a softer version of it, Extreme a stronger one (the teeth placement,
+		// what is read and how it is measured are left as they are)
 		void Preset(Config& c, int which)
 		{
-			const Config d{};
-			c.throatShapeGain = d.throatShapeGain; c.throatDetail = d.throatDetail; c.throatShapeMax = d.throatShapeMax;
-			c.throatWideExtra = d.throatWideExtra; c.throatMotion = d.throatMotion; c.mouthWideGain = d.mouthWideGain; c.lipRound = d.lipRound;
-			c.cheekGain = d.cheekGain; c.gulpSize = d.gulpSize; c.shapeRidge = d.shapeRidge; c.shapeKnob = d.shapeKnob;
-			if (which == 0) {   // subtle
-				c.throatShapeGain = 1.0f; c.throatDetail = 1.2f; c.throatShapeMax = 2.0f; c.throatWideExtra = 0.1f; c.throatMotion = 0.2f;
-				c.mouthWideGain = 0.8f; c.lipRound = 0.7f; c.cheekGain = 0.6f; c.gulpSize = 0.8f; c.shapeRidge = 0.4f; c.shapeKnob = 0.5f;
-			} else if (which == 2) {   // extreme
-				c.throatShapeGain = 2.4f; c.throatDetail = 2.2f; c.throatShapeMax = 3.5f; c.throatWideExtra = 0.8f; c.throatMotion = 1.0f;
-				c.mouthWideGain = 1.4f; c.lipRound = 0.4f; c.cheekGain = 1.5f; c.gulpSize = 1.8f; c.shapeRidge = 0.9f; c.shapeKnob = 1.0f;
-			}
+			//                         subtle  default  extreme
+			auto v = [which](float s, float d, float e) { return which == 0 ? s : which == 2 ? e : d; };
+			c.mouthExtra = v(1.20f, 2.06f, 3.50f);
+			c.jawUnits = v(3.60f, 2.70f, 2.00f);
+			c.lipUnits = v(9.00f, 7.70f, 6.00f);
+			c.widenUnits = v(3.00f, 2.30f, 1.70f);
+			c.upperLipMax = v(0.90f, 1.20f, 1.80f);
+			c.lowerLipMax = v(1.40f, 1.90f, 2.80f);
+			c.cornerMax = v(0.70f, 0.90f, 1.40f);
+			c.stretch = v(0.00f, 0.08f, 0.25f);
+			c.lipCloseMax = 4.00f;
+			c.upperLipDown = v(0.45f, 0.61f, 0.80f);
+			c.lowerLipUp = 0.0f;
+			c.lipRound = v(0.70f, 0.60f, 0.45f);
+			c.mouthWideGain = v(0.80f, 1.00f, 1.40f);
+			c.mouthWideMax = v(0.60f, 0.80f, 1.30f);
+			c.cornerOpen = v(0.14f, 0.20f, 0.30f);
+			c.cheekGain = v(0.60f, 1.00f, 1.60f);
+			c.cheekMax = v(1.00f, 1.60f, 2.40f);
+			c.cheekInner = v(1.80f, 1.50f, 1.20f);
+			c.throatFrom = 6.10f;
+			c.throatBand = 1.86f;
+			c.throatFill = v(0.80f, 1.00f, 1.00f);
+			c.throatRest = v(2.40f, 2.00f, 1.40f);
+			c.throatShapeGain = v(1.10f, 1.60f, 2.40f);
+			c.throatShapeMax = v(2.00f, 3.00f, 4.00f);
+			c.throatWideUnits = v(3.00f, 3.00f, 2.20f);
+			c.throatWideExtra = v(0.15f, 0.30f, 0.60f);
+			c.throatDetail = v(1.20f, 1.60f, 2.20f);
+			c.throatMotion = v(0.20f, 0.40f, 0.80f);
+			c.throatMotionLen = 6.00f;
+			c.gulpSize = v(0.80f, 1.20f, 1.80f);
+			c.gagJaw = v(15.0f, 25.0f, 45.0f);
+			c.gagSqueeze = v(0.25f, 0.40f, 0.60f);
+			c.shapeRidge = v(0.40f, 0.60f, 0.90f);
+			c.shapeKnob = v(0.50f, 0.70f, 1.00f);
+			c.faceEyes = v(0.35f, 0.53f, 0.80f);
+			c.faceBrows = v(0.35f, 0.53f, 0.80f);
+			c.faceGag = v(0.35f, 0.53f, 0.85f);
+			c.lipDrag = v(0.30f, 0.53f, 0.80f);
+			c.lipDragSpeed = 34.0f;
+			c.recoverHold = v(0.80f, 1.00f, 1.60f);
+			c.recoverOpen = v(0.20f, 0.29f, 0.45f);
 		}
 
 		void __stdcall DrawMouth()
@@ -140,7 +234,7 @@ namespace DeepFit::Menu
 			if (ImGuiMCP::Button(T("Default"))) { Preset(c, 1); ch = true; }
 			ImGuiMCP::SameLine();
 			if (ImGuiMCP::Button(T("Extreme"))) { Preset(c, 2); ch = true; }
-			Help("Sets the throat, mouth-width, cheek, gulp and shape sliders together. Fine-tune them below afterwards.");
+			Help("Sets the mouth, lips, cheeks, throat, swallow / gag, face and lip-drag sliders together - Default is the tuned set, Subtle softer, Extreme stronger. Fine-tune them below afterwards. Teeth placement and what DeepFit reads are left as they are.");
 
 			Section("Test (no scene needed)");
 			auto& pv = DeepFit::GetPreview();
@@ -167,7 +261,8 @@ namespace DeepFit::Menu
 						if (ImGuiMCP::RadioButton(kSizes[i], pv.size == i))
 							pv.size = i;
 					}
-					Help("A plain schlong the size of one of TNG's size categories (scaled as set in TNG's MCM), or of the player's own TNG size. Sliders: the height, width and shape below.");
+					Help("A plain schlong the size of one of TNG's size categories, or of the player's own TNG size. Each size uses your TNG size modifier for it - the multiplier set for that size in TNG's MCM (0.8 / 0.9 / 1.0 / 1.2 / 1.4 as TNG installs them); TNG's per-race multipliers are not included. Sliders: the height, width and shape below.");
+					ImGuiMCP::TextDisabled("%s", T("Sizes follow your TNG size modifiers (TNG's MCM)."));
 					if (pv.size == 5)
 						ImGuiMCP::TextDisabled(T("Your TNG size: %s (x%.2f)%s"), ts.mine >= 0 ? kSizes[ts.mine] : "?", ts.scale[ts.mine >= 0 ? ts.mine : 2],
 							ts.fromTng ? "" : T(" - TNG did not answer, M used"));
@@ -229,8 +324,26 @@ namespace DeepFit::Menu
 			Help("How far the jaw morph at 100 opens the jaw. Lower = the jaw opens wider for the same shaft.");
 			ch |= Slider("Lips round (units per 100)", &c.lipUnits, 1.0f, 16.0f, "%.1f");
 			ch |= Slider("Corners spread (units per 100)", &c.widenUnits, 0.5f, 10.0f, "%.1f");
-			ch |= Slider("Most a morph is set to", &c.morphMax, 10.0f, 600.0f, "%.0f");
+			ch |= Slider("Most a morph is set to", &c.morphMax, 0.0f, 300.0f, "%.0f");
 			Help("MFEE caps the morphs too: its Max in MuFacialExpressionExtended.ini (100 as installed). Raise both for more than the morph's full size.");
+			{   // 0.4.1: MFEE's own cap - it reads it only when the game starts (it has no way to change it while playing)
+				const float mx = MfeeMax();
+				if (mx > 0.0f)
+					ImGuiMCP::TextDisabled(T("MFEE's limit (its ini): %.0f"), mx);
+				if (mx > 0.0f && mx < 299.5f) {
+					ImGuiMCP::SameLine();
+					if (ImGuiMCP::Button(T("Raise MFEE's limit to 300")))
+						SetMfeeMax(300.0f);
+				} else if (mx >= 299.5f) {
+					ImGuiMCP::SameLine();
+					if (ImGuiMCP::Button(T("Put MFEE's limit back to 100")))
+						SetMfeeMax(100.0f);
+				}
+				if (g_mfeeChanged)
+					ImGuiMCP::TextColored(ImGuiMCP::ImVec4{ 1.0f, 0.75f, 0.3f, 1.0f }, "%s", T("MFEE's limit is changed in its ini - restart the game for it to take effect (MFEE only reads it at start)."));
+				else
+					Help("MFEE has no way to change its limit while the game runs: the button writes it to MFEE's ini, and it takes effect after a restart. It is MFEE's limit for every morph it drives, not only DeepFit's.");
+			}
 
 			Section("Lips");
 			ch |= Slider("Stretch past the shaft", &c.stretch, -1.0f, 1.0f, "%.2f");
@@ -317,7 +430,7 @@ namespace DeepFit::Menu
 			}
 			ch |= Check("Teeth part while the mouth is full", &c.teethOpen);
 			{
-				static const char* kTeeth[] = { "Off", "While the mouth is full", "Always (kept moved)" };
+				static const char* kTeeth[] = { "Off", "While the mouth is full", "The whole scene" };
 				ImGuiMCP::Text("%s", T("Move the teeth:"));
 				for (int i = 0; i < 3; ++i) {
 					ImGuiMCP::SameLine();
@@ -326,7 +439,7 @@ namespace DeepFit::Menu
 						ch = true;
 					}
 				}
-				Help("Moves his teeth a little down and back so they sit clear of the shaft. They are hung on a node of DeepFit's own under his head, so the game rebuilding his face does not undo it for long - DeepFit checks once a second and puts them back. Always: kept moved outside scenes too, only on the men DeepFit fits, and only when this is chosen (it costs next to nothing).");
+				Help("Moves his teeth a little down and back so they sit clear of the shaft, only in scenes: while his mouth is full, or the whole time a partner's schlong is near him. Outside scenes they are put back exactly where the game has them. If the game rebuilds his face mid-scene, DeepFit moves them again within a second.");
 				if (c.teethMove > 0) {
 					ch |= Slider("Teeth down", &c.teethDown, -1.0f, 2.0f, "%.2f units");
 					ch |= Slider("Teeth back", &c.teethBack, -1.0f, 2.0f, "%.2f units");

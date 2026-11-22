@@ -65,7 +65,7 @@ struct Config
 	float throatMotionLen = 2.0f;  // 0.3.6: its length along the shaft (units)
 	float throatDetail = 1.6f;     // 0.3.5: a flare / ring / knot this many times more pronounced than the shaft's own
 	bool  teethOpen = true;        // the SMP Head teeth-open modifier (12) while the shaft is in his mouth
-	int   teethMove = 1;           // 0.4.0: teeth moved down / back: 0 off, 1 while the mouth is full, 2 always
+	int   teethMove = 1;           // 0.4.0: teeth moved down / back: 0 off, 1 while the mouth is full, 2 the whole scene (0.4.2)
 	float teethDown = 0.3f;        // units
 	float teethBack = 0.3f;        // units
 	std::string teethParts = "teeth, mouth";   // 0.4.0: the face parts that count as teeth (part of their name, comma separated)
