@@ -63,6 +63,13 @@ void Config::load()
 		else if (k == "ThroatMorphMax") fl(throatMorphMax);
 		else if (k == "ThroatFrom") fl(throatFrom);
 		else if (k == "ThroatFull") fl(throatFull);
+		else if (k == "ThroatShape") bl(throatShape);
+		else if (k == "ThroatBand") fl(throatBand);
+		else if (k == "ThroatFill") fl(throatFill);
+		else if (k == "ThroatRest") fl(throatRest);
+		else if (k == "ThroatShapeGain") fl(throatShapeGain);
+		else if (k == "ThroatShapeMax") fl(throatShapeMax);
+		else if (k == "ThroatWideUnits") fl(throatWideUnits);
 		else if (k == "TeethOpen") bl(teethOpen);
 		else if (k == "LipCloseMax") fl(lipCloseMax);
 		else if (k == "UpperLipDown") fl(upperLipDown);
@@ -96,6 +103,8 @@ void Config::save()
 		{ "MouthExtra", f2(mouthExtra) }, { "JawUnits", f2(jawUnits) }, { "LipUnits", f2(lipUnits) }, { "WidenUnits", f2(widenUnits) },
 		{ "MorphMax", f2(morphMax) }, { "MorphLerpMs", std::to_string(morphLerpMs) }, { "ThroatMorphs", b2(throatMorphs) },
 		{ "ThroatMorphMax", f2(throatMorphMax) }, { "ThroatFrom", f2(throatFrom) }, { "ThroatFull", f2(throatFull) },
+		{ "ThroatShape", b2(throatShape) }, { "ThroatBand", f2(throatBand) }, { "ThroatFill", f2(throatFill) }, { "ThroatRest", f2(throatRest) },
+		{ "ThroatShapeGain", f2(throatShapeGain) }, { "ThroatShapeMax", f2(throatShapeMax) }, { "ThroatWideUnits", f2(throatWideUnits) },
 		{ "TeethOpen", b2(teethOpen) }, { "LipCloseMax", f2(lipCloseMax) }, { "UpperLipDown", f2(upperLipDown) },
 	};
 	std::vector<std::string> lines;

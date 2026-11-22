@@ -59,8 +59,19 @@ namespace
 	};
 
 	// 0.2.0: the mouth morphs DeepFit drives (SMP Head's, through MFEE)
-	constexpr int         kMorphs = 6;
-	constexpr const char* kMorphNames[kMorphs] = { "PPA_JawWide", "PPA_LipStretch", "PPA_LipWiden", "PPA_TH1", "PPA_TH2", "PPA_TH3" };
+	// 0.3.5: + DeepFit's own throat morphs (added to SMP Head's PPA_HPH_Male.tri), ten thin bands down the front of his
+	// throat along the straight line from under his chin to the neck seam: DF_ThroatFill1-10 bring the band's skin out onto
+	// that line (rounded across, like a tube under the skin), DF_Throat1-10 push it 1 unit further out at 100
+	constexpr int         kBands = 10;
+	constexpr int         kFill0 = 6, kBand0 = kFill0 + kBands, kWide0 = kBand0 + kBands;   // 0.3.5: + DF_ThroatWide1-10 (a wide shaft spreads it sideways)
+	constexpr int         kMorphs = kWide0 + kBands;
+	constexpr const char* kMorphNames[kMorphs] = { "PPA_JawWide", "PPA_LipStretch", "PPA_LipWiden", "PPA_TH1", "PPA_TH2", "PPA_TH3",
+		"DF_ThroatFill1", "DF_ThroatFill2", "DF_ThroatFill3", "DF_ThroatFill4", "DF_ThroatFill5",
+		"DF_ThroatFill6", "DF_ThroatFill7", "DF_ThroatFill8", "DF_ThroatFill9", "DF_ThroatFill10",
+		"DF_Throat1", "DF_Throat2", "DF_Throat3", "DF_Throat4", "DF_Throat5",
+		"DF_Throat6", "DF_Throat7", "DF_Throat8", "DF_Throat9", "DF_Throat10",
+		"DF_ThroatWide1", "DF_ThroatWide2", "DF_ThroatWide3", "DF_ThroatWide4", "DF_ThroatWide5",
+		"DF_ThroatWide6", "DF_ThroatWide7", "DF_ThroatWide8", "DF_ThroatWide9", "DF_ThroatWide10" };
 
 	struct Receiver
 	{
@@ -72,7 +83,8 @@ namespace
 		DrivenBone            bones[kNumSpecs];
 		ActorHandle           actor;                 // 0.2.0: whose face the morphs go on
 		float                 morph[kMorphs] = {};   // 0.2.0: eased mouth morph values (0-100)
-		int                   sent[kMorphs] = { -1, -1, -1, -1, -1, -1 };
+		int                   sent[kMorphs];   // set to -1 (never sent) in the constructor
+		Receiver() { std::fill(std::begin(sent), std::end(sent), -1); }
 		float                 sendTimer = 0.0f;
 		bool                  teeth = false;
 		bool                  teethSent = false;
@@ -623,6 +635,52 @@ namespace
 				want[5] = part(0.15f, 0.7f, 1.0f);    // TH3
 				want[4] = part(0.35f, 1.0f, 0.7f);    // TH2
 			}
+			// 0.3.5: the throat follows the schlong's own shape: the shaft is measured every half unit along its length inside
+			// his mouth (how thick it is there). Each band of his throat, from ThroatFrom deep on, is filled out to the line
+			// once the shaft reaches it, and swells past it by how much thicker than an empty throat (ThroatRest) the part
+			// passing it is - a flared head, a medial ring or a knot shows as it goes down
+			if (cfg.throatShape && (through || inMouth)) {
+				constexpr int kBins = 80;   // half-unit bins, 40 units
+				float zLo[kBins], zHi[kBins], xLo[kBins], xHi[kBins];
+				for (int b = 0; b < kBins; ++b) { zLo[b] = xLo[b] = 1e9f; zHi[b] = xHi[b] = -1e9f; }
+				for (auto& p : hs) {
+					if (p.x * p.x + p.z * p.z > 64.0f)
+						continue;   // not in line with his mouth (the balls, his partner's belly)
+					const int b = static_cast<int>(std::floor(-p.y * 2.0f));
+					if (b < 0 || b >= kBins)
+						continue;
+					zLo[b] = std::min(zLo[b], p.z); zHi[b] = std::max(zHi[b], p.z);
+					xLo[b] = std::min(xLo[b], p.x); xHi[b] = std::max(xHi[b], p.x);
+				}
+				// the shaft's half height (towards the front of his throat) and half width (across it) s units past the lips
+				auto halfH = [&](float s) {
+					const int b = static_cast<int>(std::floor(s * 2.0f));
+					return (b < 0 || b >= kBins || zHi[b] < zLo[b]) ? 0.0f : 0.5f * (zHi[b] - zLo[b]);
+				};
+				auto halfW = [&](float s) {
+					const int b = static_cast<int>(std::floor(s * 2.0f));
+					return (b < 0 || b >= kBins || xHi[b] < xLo[b]) ? 0.0f : 0.5f * (xHi[b] - xLo[b]);
+				};
+				float tip = -1.0f;   // how far in the tip is (the deepest bin with shaft in it)
+				for (int b = kBins - 1; b >= 0; --b)
+					if (zHi[b] >= zLo[b]) { tip = (b + 1) * 0.5f; break; }
+				float raw[kBands];
+				for (int k = 0; k < kBands; ++k) {
+					const float s = cfg.throatFrom + (k + 0.5f) * cfg.throatBand;
+					const float lo = s - 0.25f * cfg.throatBand, hi = s + 0.25f * cfg.throatBand;
+					const float rz = std::max(halfH(lo), halfH(hi)), rx = std::max(halfW(lo), halfW(hi));
+					// eased in over the last two bands before the tip: a rounded end, not a cut-off
+					float reach = std::clamp((tip - (s - 0.5f * cfg.throatBand)) / (2.0f * cfg.throatBand), 0.0f, 1.0f);
+					reach = reach * reach * (3.0f - 2.0f * reach);
+					const bool here = rz > 0.0f && reach > 0.0f;
+					want[kFill0 + k] = here ? 100.0f * cfg.throatFill * reach : 0.0f;
+					raw[k] = here ? std::clamp((rz - cfg.throatRest) * cfg.throatShapeGain, 0.0f, cfg.throatShapeMax) : 0.0f;
+					// wider than it is tall: the bulge spreads sideways (not further out)
+					want[kWide0 + k] = here ? 100.0f * reach * std::clamp((rx - std::max(rz, cfg.throatRest)) / std::max(cfg.throatWideUnits, 0.1f), 0.0f, 1.5f) : 0.0f;
+				}
+				for (int k = 0; k < kBands; ++k)   // a touch of blur along it, so a sudden step in the shaft is not a shelf
+					want[kBand0 + k] = 100.0f * (0.15f * raw[std::max(k - 1, 0)] + 0.7f * raw[k] + 0.15f * raw[std::min(k + 1, kBands - 1)]);
+			}
 			const float km = 1.0f - std::exp(-delta * 10.0f);
 			for (int m = 0; m < kMorphs; ++m) {
 				want[m] = std::clamp(want[m], 0.0f, cfg.morphMax);
@@ -653,8 +711,11 @@ namespace
 						(r.bones[kUpperCenter].valid && r.bones[kBottomCenter].valid) ? len(rest[kUpperCenter] - rest[kBottomCenter]) : -1.0f);
 			}
 			if (cfg.debugLog && g_logTimer > 1.0f)
-				logs::info("DeepFit: mouth - shaft {:.2f} tall, {:.2f} wide at the lips, tip {:.1f} deep | jaw {:.0f} round {:.0f} widen {:.0f} throat {:.0f}/{:.0f}/{:.0f}{}",
-					height, width, depth, r.morph[0], r.morph[1], r.morph[2], r.morph[3], r.morph[4], r.morph[5], DeepFit::MegaMouthNow() ? " (mega mouth)" : "");
+				logs::info("DeepFit: mouth - shaft {:.2f} tall, {:.2f} wide at the lips, tip {:.1f} deep | jaw {:.0f} round {:.0f} widen {:.0f} throat {:.0f}/{:.0f}/{:.0f} bands {:.0f}/{:.0f}/{:.0f}/{:.0f}/{:.0f}/{:.0f}/{:.0f}/{:.0f}/{:.0f}/{:.0f}{}",
+					height, width, depth, r.morph[0], r.morph[1], r.morph[2], r.morph[3], r.morph[4], r.morph[5],
+					r.morph[kBand0], r.morph[kBand0 + 1], r.morph[kBand0 + 2], r.morph[kBand0 + 3], r.morph[kBand0 + 4],
+					r.morph[kBand0 + 5], r.morph[kBand0 + 6], r.morph[kBand0 + 7], r.morph[kBand0 + 8], r.morph[kBand0 + 9],
+					DeepFit::MegaMouthNow() ? " (mega mouth)" : "");
 		}
 		for (int i = 0; i < kNumSpecs; ++i) {
 			auto& b = r.bones[i];

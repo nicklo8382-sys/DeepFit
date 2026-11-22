@@ -79,11 +79,26 @@ namespace DeepFit::Menu
 
 			ImGuiMCP::SeparatorText("Throat and teeth");
 			ch |= ImGuiMCP::Checkbox("Throat bulge (bones)", &c.throatEnabled);
-			ch |= ImGuiMCP::Checkbox("Throat bulge (morphs, by depth)", &c.throatMorphs);
-			Help("One smooth ridge down the front of his throat (SMP Head's PPA_TH1-3 together), growing from under his chin towards his neck as the tip goes deeper.");
+			ch |= ImGuiMCP::Checkbox("Throat bulge, by the schlong's shape", &c.throatShape);
+			Help("DeepFit's own throat morphs: ten thin bands down the front of his throat, from under his chin to just above the neck seam. "
+				 "Where the shaft is, the throat fills out to a straight line from chin to neck, then swells past it by how thick that part of the schlong is, "
+				 "so a flared head, a medial ring or a knot shows as it goes down.");
+			if (c.throatShape) {
+				ch |= ImGuiMCP::SliderFloat("Throat starts at", &c.throatFrom, 0.0f, 12.0f, "%.1f units deep");
+				Help("How far past his lips the schlong has to be to reach the top of his throat (under his chin).");
+				ch |= ImGuiMCP::SliderFloat("Shaft per band", &c.throatBand, 0.3f, 2.0f, "%.2f units");
+				Help("How much of the shaft's length each of the ten bands stands for (smaller = the throat shows a shorter stretch of it, in more detail).");
+				ch |= ImGuiMCP::SliderFloat("Fill out to the line", &c.throatFill, 0.0f, 1.0f, "%.2f");
+				ch |= ImGuiMCP::SliderFloat("Room in an empty throat", &c.throatRest, 0.0f, 2.0f, "%.1f");
+				Help("A schlong thinner than this (half its thickness, in units) passes without a bulge.");
+				ch |= ImGuiMCP::SliderFloat("Bulge per thickness", &c.throatShapeGain, 0.2f, 3.0f, "x%.1f");
+				ch |= ImGuiMCP::SliderFloat("Bulge, at most", &c.throatShapeMax, 0.5f, 5.0f, "%.1f units");
+				ch |= ImGuiMCP::SliderFloat("Spreads fully sideways at", &c.throatWideUnits, 0.3f, 3.0f, "%.1f units wider");
+				Help("A schlong wider than it is tall spreads the bulge out to the sides; this much wider (half width over half height) spreads it all the way.");
+			}
+			ch |= ImGuiMCP::Checkbox("Old throat ridge (PPA_TH1-3, by depth)", &c.throatMorphs);
 			if (c.throatMorphs) {
 				ch |= ImGuiMCP::SliderFloat("Throat ridge, how strong", &c.throatMorphMax, 0.0f, 240.0f, "%.0f");
-				ch |= ImGuiMCP::SliderFloat("Starts swelling at", &c.throatFrom, 0.0f, 10.0f, "%.1f units deep");
 				ch |= ImGuiMCP::SliderFloat("Fully out at", &c.throatFull, 6.0f, 24.0f, "%.1f units deep");
 			}
 			ch |= ImGuiMCP::SliderFloat("Throat bulge, at most", &c.throatMax, 0.0f, 8.0f, "%.1f");
