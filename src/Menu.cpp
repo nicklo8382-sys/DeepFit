@@ -80,6 +80,12 @@ namespace DeepFit::Menu
 			ImGuiMCP::SeparatorText("Throat and teeth");
 			ch |= ImGuiMCP::Checkbox("Throat bulge (bones)", &c.throatEnabled);
 			ch |= ImGuiMCP::Checkbox("Throat bulge (morphs, by depth)", &c.throatMorphs);
+			Help("One smooth ridge down the front of his throat (SMP Head's PPA_TH1-3 together), growing from under his chin towards his neck as the tip goes deeper.");
+			if (c.throatMorphs) {
+				ch |= ImGuiMCP::SliderFloat("Throat ridge, how strong", &c.throatMorphMax, 0.0f, 240.0f, "%.0f");
+				ch |= ImGuiMCP::SliderFloat("Starts swelling at", &c.throatFrom, 0.0f, 10.0f, "%.1f units deep");
+				ch |= ImGuiMCP::SliderFloat("Fully out at", &c.throatFull, 6.0f, 24.0f, "%.1f units deep");
+			}
 			ch |= ImGuiMCP::SliderFloat("Throat bulge, at most", &c.throatMax, 0.0f, 8.0f, "%.1f");
 			ch |= ImGuiMCP::Checkbox("Teeth part while the mouth is full", &c.teethOpen);
 

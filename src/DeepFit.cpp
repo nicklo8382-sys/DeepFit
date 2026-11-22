@@ -613,10 +613,15 @@ namespace
 				want[2] = DeepFit::MegaMouthNow() ? cfg.morphMax : std::max(0.0f, (width + cfg.mouthExtra - restWidth) * 0.5f) / std::max(cfg.widenUnits, 0.1f) * 100.0f;
 			}
 			if (cfg.throatMorphs && (through || inMouth)) {
-				auto ramp = [&](float a, float b) { return std::clamp((depth - a) / (b - a), 0.0f, 1.0f) * cfg.morphMax; };
-				want[3] = ramp(5.0f, 8.5f);
-				want[4] = ramp(8.5f, 12.0f);
-				want[5] = ramp(12.0f, 20.0f);
+				// 0.3.4: one smooth ridge instead of three lumps one after another. The three morphs overlap down his
+				// throat (from the SMP Head tri): TH1 just under the chin (it pushes down), TH3 the middle, TH2 low by
+				// the neck seam. They come out in that order as the tip goes deeper, overlapping, and stay out, each at
+				// its own share so they add up to an even ridge - TH2 kept lower so there is no ledge at the neck seam.
+				const float u = (depth - cfg.throatFrom) / std::max(cfg.throatFull - cfg.throatFrom, 0.5f);
+				auto part = [&](float a, float b, float w) { return std::clamp((u - a) / (b - a), 0.0f, 1.0f) * w * cfg.throatMorphMax; };
+				want[3] = part(0.0f, 0.45f, 0.5f);    // TH1
+				want[5] = part(0.15f, 0.7f, 1.0f);    // TH3
+				want[4] = part(0.35f, 1.0f, 0.7f);    // TH2
 			}
 			const float km = 1.0f - std::exp(-delta * 10.0f);
 			for (int m = 0; m < kMorphs; ++m) {

@@ -60,6 +60,9 @@ void Config::load()
 		else if (k == "MorphMax") fl(morphMax);
 		else if (k == "MorphLerpMs") { try { morphLerpMs = std::stoi(v); } catch (...) {} }
 		else if (k == "ThroatMorphs") bl(throatMorphs);
+		else if (k == "ThroatMorphMax") fl(throatMorphMax);
+		else if (k == "ThroatFrom") fl(throatFrom);
+		else if (k == "ThroatFull") fl(throatFull);
 		else if (k == "TeethOpen") bl(teethOpen);
 		else if (k == "LipCloseMax") fl(lipCloseMax);
 		else if (k == "UpperLipDown") fl(upperLipDown);
@@ -92,6 +95,7 @@ void Config::save()
 		{ "MouthMorphs", b2(mouthMorphs) }, { "MegaMouth", b2(megaMouth) }, { "MegaKey", std::to_string(megaKey) }, { "MegaKeyMods", std::to_string(megaKeyMods) },
 		{ "MouthExtra", f2(mouthExtra) }, { "JawUnits", f2(jawUnits) }, { "LipUnits", f2(lipUnits) }, { "WidenUnits", f2(widenUnits) },
 		{ "MorphMax", f2(morphMax) }, { "MorphLerpMs", std::to_string(morphLerpMs) }, { "ThroatMorphs", b2(throatMorphs) },
+		{ "ThroatMorphMax", f2(throatMorphMax) }, { "ThroatFrom", f2(throatFrom) }, { "ThroatFull", f2(throatFull) },
 		{ "TeethOpen", b2(teethOpen) }, { "LipCloseMax", f2(lipCloseMax) }, { "UpperLipDown", f2(upperLipDown) },
 	};
 	std::vector<std::string> lines;

@@ -32,6 +32,9 @@ struct Config
 	float morphMax = 300.0f;       // the most any of them is set to (MFEE's own Max caps it too)
 	int   morphLerpMs = 120;       // MFEE blend time for each change
 	bool  throatMorphs = true;     // PPA_TH1-3 by how deep the tip is
+	float throatMorphMax = 120.0f; // 0.3.4: the throat morphs' own most (they share one smooth ridge; MorphMax still caps it)
+	float throatFrom = 5.0f;       // 0.3.4: tip this deep (units past the lips) = the throat starts to swell
+	float throatFull = 14.0f;      // 0.3.4: this deep = the whole ridge is out
 	bool  teethOpen = true;        // the SMP Head teeth-open modifier (12) while the shaft is in his mouth
 	float lipCloseMax = 2.0f;      // lips may close in this far (round a slim shaft once the jaw is open)
 	float upperLipDown = 0.6f;     // 0.3.3: the upper lip pulled down this far while the mouth is full (the lip morph peaks it up to the nose)
