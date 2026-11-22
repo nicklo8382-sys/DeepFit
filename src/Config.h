@@ -68,7 +68,7 @@ struct Config
 	int   teethMove = 1;           // 0.4.0: teeth moved down / back: 0 off, 1 while the mouth is full, 2 always
 	float teethDown = 0.3f;        // units
 	float teethBack = 0.3f;        // units
-	std::string teethParts = "teeth";   // 0.4.0: the face parts that count as teeth (part of their name, comma separated)
+	std::string teethParts = "teeth, mouth";   // 0.4.0: the face parts that count as teeth (part of their name, comma separated)
 	bool  faceReact = true;        // 0.4.0: eyes close / brows lift with depth, clench in a gag
 	float faceEyes = 0.5f;
 	float faceBrows = 0.4f;
@@ -88,6 +88,8 @@ struct Config
 	void  setRaceStrength(const std::string& a_race, float a_k);
 	void  clearRaces();
 	float lipCloseMax = 2.0f;      // lips may close in this far (round a slim shaft once the jaw is open)
+	float lowerLipUp = 0.0f;       // 0.4.1: the lower lip pushed up this far while the mouth is full
+	bool  lipsAlongShaft = true;   // 0.4.1: the mouth opens to the shaft measured across it (not straight up and down his face)
 	float upperLipDown = 0.6f;     // 0.3.3: the upper lip pulled down this far while the mouth is full (the lip morph peaks it up to the nose)
 	float noseFollow = 0.5f;       // nose base rises by this fraction of the upper-lip-center push
 	float noseMax = 0.5f;

@@ -115,6 +115,8 @@ void Config::load()
 		else if (k == "TeethOpen") bl(teethOpen);
 		else if (k == "LipCloseMax") fl(lipCloseMax);
 		else if (k == "UpperLipDown") fl(upperLipDown);
+		else if (k == "LowerLipUp") fl(lowerLipUp);
+		else if (k == "LipsAlongShaft") bl(lipsAlongShaft);
 		else if (k == "NoseFollow") fl(noseFollow);
 		else if (k == "NoseMax") fl(noseMax);
 		else if (k == "ThroatEnabled") bl(throatEnabled);
@@ -161,6 +163,7 @@ void Config::save()
 		{ "ThroatWideExtra", f2(throatWideExtra) }, { "ThroatDetail", f2(throatDetail) },
 		{ "ThroatMotion", f2(throatMotion) }, { "ThroatMotionLength", f2(throatMotionLen) },
 		{ "TeethOpen", b2(teethOpen) }, { "LipCloseMax", f2(lipCloseMax) }, { "UpperLipDown", f2(upperLipDown) },
+		{ "LowerLipUp", f2(lowerLipUp) }, { "LipsAlongShaft", b2(lipsAlongShaft) },
 	};
 	std::vector<std::string> lines;
 	{

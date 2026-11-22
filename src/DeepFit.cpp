@@ -128,6 +128,11 @@ namespace
 		std::vector<TeethHook> teethHooks;
 		NiPointer<NiNode>      teethNode;
 		float                  teethK = 0.0f, teethScan = 0.0f;
+		NiPoint3               mouthC{ 0, 0, 0 };        // 0.4.0: the middle of his lips (world), and the test schlong's
+		float                  previewD = 0.0f, previewR = 1.3f;   // tip depth and thickness this frame
+		int                    previewShape = 0;
+		bool                   tiltSet = false;          // 0.4.1: the test page's head tilt
+		NiMatrix3              tiltBase, tiltLast;
 		bool                   teethTold = false;
 	};
 
@@ -704,6 +709,35 @@ namespace
 
 	// ------------------------------------------------------------------ per receiver solve
 
+	// 0.4.1: the test schlong's thickness along it (1 = as set), sIn units past his lips, its tip D deep
+	float previewProfile(float sIn, float D, int shape)
+	{
+		const auto& pv = g_preview;
+		float k = 1.0f;
+		if (shape == 1) {   // horse: a medial ring, and the flared head
+			k += 0.3f * std::exp(-std::pow((sIn - D * 0.45f) / 0.35f, 2.0f));
+			if (sIn > D - 2.2f) k = std::max(k, 1.45f);
+		} else if (shape == 2)   // knot: a bulb near the base
+			k += 0.85f * std::exp(-std::pow((sIn - std::min(2.0f, D * 0.3f)) / 0.9f, 2.0f));
+		else if (shape == 5) {   // a bump, BumpAt along it from where it enters (3 units out) to the tip
+			const float at = -3.0f + std::clamp(pv.bumpAt, 0.0f, 1.0f) * (std::max(pv.depth, 0.5f) + 3.0f);
+			k += pv.bumpSize * std::exp(-std::pow((sIn - at) / 0.9f, 2.0f));
+		}
+		return k;
+	}
+	double g_strokePhase = 0.0;
+
+	// 0.4.1: the test schlong placed and angled in his face's frame (right, forward, up from the middle of his lips): tip up
+	// by Pitch, to his right by Yaw, entering Up / Side off the middle. The lips fit what is placed, so it still collides.
+	NiPoint3 previewPlace(const NiPoint3& p)
+	{
+		const auto& pv = g_preview;
+		const float a = -pv.pitch * 0.01745329f, b = pv.yaw * 0.01745329f;
+		NiPoint3 q(p.x, p.y * std::cos(a) - p.z * std::sin(a), p.y * std::sin(a) + p.z * std::cos(a));
+		q = NiPoint3(q.x * std::cos(b) - q.y * std::sin(b), q.x * std::sin(b) + q.y * std::cos(b), q.z);
+		return NiPoint3(q.x + pv.side, q.y, q.z + pv.up);
+	}
+
 	void solve(Receiver& r, const std::vector<NiPoint3>& shaft, float delta, bool preview = false)
 	{
 		auto& cfg = Config::get();
@@ -747,6 +781,7 @@ namespace
 		}
 		const NiPoint3 X = r.fx, Y = r.fy, Z = r.fz;
 		const NiPoint3 C = (rest[kUpperCenter] + rest[kBottomCenter]) * 0.5f;
+		r.mouthC = C;
 
 		// shaft vertices in head space, relative to the mouth centre
 		std::vector<NiPoint3> hs;
@@ -760,24 +795,32 @@ namespace
 			hs.clear();
 			const auto& pv = g_preview;
 			float D = std::max(pv.depth, 0.5f);
-			if (pv.strokes)
-				D *= 0.78f + 0.22f * std::sin(static_cast<float>(g_clock) * 3.7699f);   // in and out, 0.6 a second
-			const float T = std::max(pv.thick, 0.2f), W = std::max(pv.width, 0.2f);
+			if (pv.strokes) {   // in and out (0.4.1: its speed and length set on the test page)
+				g_strokePhase += delta * std::clamp(pv.speed, 0.05f, 4.0f) * 6.2831853;
+				const float L = std::clamp(pv.strokeLen, 0.0f, 0.9f);
+				D *= 1.0f - L + L * std::sin(static_cast<float>(std::fmod(g_strokePhase, 6.2831853)));
+			}
+			float T = std::max(pv.thick, 0.2f), W = std::max(pv.width, 0.2f);
+			int   pshape = pv.shape;
+			if (pv.size >= 0) {   // 0.4.0: a TNG size - a plain, round schlong (1.3 half thickness at TNG's 1.0)
+				const auto ts = DeepFit::GetTngSizes();
+				const int  cat = pv.size == 5 ? (ts.mine >= 0 ? ts.mine : 2) : std::clamp(pv.size, 0, 4);
+				T = W = 1.3f * ts.scale[cat];
+				pshape = 0;
+			}
+			r.previewD = D;
+			r.previewR = 0.5f * (T + W);
+			r.previewShape = pshape;
 			for (float sIn = -3.0f; sIn <= D; sIn += 0.25f) {
-				float k = 1.0f;
-				if (pv.shape == 1) {   // horse: a medial ring, and the flared head
-					k += 0.3f * std::exp(-std::pow((sIn - D * 0.45f) / 0.35f, 2.0f));
-					if (sIn > D - 2.2f) k = std::max(k, 1.45f);
-				} else if (pv.shape == 2)   // knot: a bulb near the base
-					k += 0.85f * std::exp(-std::pow((sIn - std::min(2.0f, D * 0.3f)) / 0.9f, 2.0f));
+				const float k = previewProfile(sIn, D, pshape);
 				const float tipK = std::sqrt(std::clamp((D - sIn) / 0.8f, 0.0f, 1.0f));   // the rounded tip
 				const float rz = T * k * std::max(tipK, 0.15f), rx = W * k * std::max(tipK, 0.15f);
 				for (int a = 0; a < 16; ++a) {
 					const float ang = a * 0.3926991f;
-					hs.emplace_back(rx * std::cos(ang), -sIn, rz * std::sin(ang));
+					hs.emplace_back(previewPlace(NiPoint3(rx * std::cos(ang), -sIn, rz * std::sin(ang))));
 				}
 			}
-			r.shape = pv.shape == 3 ? 6 : pv.shape == 4 ? 7 : 0;
+			r.shape = pshape == 3 ? 6 : pshape == 4 ? 7 : 0;
 			r.shapeAt = g_clock;
 		}
 
@@ -807,8 +850,54 @@ namespace
 				depth = std::max(depth, -p.y);   // into his mouth is backwards (-forward)
 			}
 			const bool  through = zTop > zBot;
-			const float height = through ? zTop - zBot : 0.0f;
-			const float width = through ? xR - xL : 0.0f;
+			float height = through ? zTop - zBot : 0.0f;
+			float width = through ? xR - xL : 0.0f;
+			// 0.4.1: across the shaft, not straight up and down his face - a shaft that goes in at an angle cut straight
+			// across looked much taller than it is, and the mouth opened far too wide for it
+			if (through && cfg.lipsAlongShaft) {
+				NiPoint3 m(0, 0, 0); int n = 0;
+				for (auto& p : hs)
+					if (p.y < 3.0f && p.y > -6.0f && p.x * p.x + p.z * p.z < 36.0f) { m = m + p; ++n; }
+				if (n >= 24) {
+					m = m * (1.0f / n);
+					float cxx = 0, cxy = 0, cxz = 0, cyy = 0, cyz = 0, czz = 0;
+					for (auto& p : hs)
+						if (p.y < 3.0f && p.y > -6.0f && p.x * p.x + p.z * p.z < 36.0f) {
+							const NiPoint3 d = p - m;
+							cxx += d.x * d.x; cxy += d.x * d.y; cxz += d.x * d.z; cyy += d.y * d.y; cyz += d.y * d.z; czz += d.z * d.z;
+						}
+					NiPoint3 v(0.0f, -1.0f, 0.0f);
+					for (int it = 0; it < 12; ++it) {
+						NiPoint3 w(cxx * v.x + cxy * v.y + cxz * v.z, cxy * v.x + cyy * v.y + cyz * v.z, cxz * v.x + cyz * v.y + czz * v.z);
+						const float lw = len(w);
+						if (lw < 1e-6f) break;
+						v = w * (1.0f / lw);
+					}
+					if (v.y > 0.0f) v = v * -1.0f;
+					if (v.y < -0.5f) {
+						const NiPoint3 org = m - v * (m.y / v.y);
+						NiPoint3 ux = NiPoint3(1.0f, 0.0f, 0.0f) - v * v.x;
+						ux = len(ux) > 1e-4f ? norm(ux) : NiPoint3(1.0f, 0.0f, 0.0f);
+						const NiPoint3 uz(v.y * ux.z - v.z * ux.y, v.z * ux.x - v.x * ux.z, v.x * ux.y - v.y * ux.x);
+						float zl = 1e9f, zh = -1e9f, xl = 1e9f, xh = -1e9f;
+						for (auto& p : hs) {
+							const NiPoint3 q = p - org;
+							const float    s = dot(q, v);
+							if (std::fabs(s) > cfg.lipDepthSlab * 1.5f)
+								continue;
+							const NiPoint3 d = q - v * s;
+							const float    px = dot(d, ux), pz = dot(d, uz);
+							if (px * px + pz * pz > 36.0f)
+								continue;
+							zl = std::min(zl, pz); zh = std::max(zh, pz); xl = std::min(xl, px); xh = std::max(xh, px);
+						}
+						if (zh > zl) {
+							height = std::min(height, zh - zl);
+							width = std::min(width, xh - xl);
+						}
+					}
+				}
+			}
 			const float restWidth = (r.bones[6].valid && r.bones[7].valid) ? len(rest[7] - rest[6]) : 4.0f;
 			float want[kMorphs] = {};
 			if (through || (inMouth && DeepFit::MegaMouthNow())) {   // 0.3.1: Mega mouth opens fully as soon as it is in his mouth
@@ -1082,6 +1171,9 @@ namespace
 					// 0.3.3: the lip-round morph peaks the middle of the upper lip up towards the nose - pull it back down
 					if (spec.kind == Kind::Lip && spec.dir.z > 0.0f && (sMax > -1e8f || inMouth) && cfg.upperLipDown > 0.0f)
 						target[i] -= cfg.upperLipDown * (i == kUpperCenter ? 1.0f : 0.6f);
+					// 0.4.1: and the lower lip up (the jaw morph drops it further than the shaft needs)
+					if (spec.kind == Kind::Lip && spec.dir.z < 0.0f && (sMax > -1e8f || inMouth) && cfg.lowerLipUp > 0.0f)
+						target[i] -= cfg.lowerLipUp * (i == kBottomCenter ? 1.0f : 0.6f);
 				} else {
 					target[i] = sMax > -1e8f ? std::clamp(sMax + cfg.lipMargin + cfg.stretch - sRest, 0.0f, mx) : 0.0f;
 					if (inMouth)
@@ -1428,6 +1520,195 @@ namespace
 		r.teethNode->world = H * r.teethNode->local;
 	}
 
+	// 0.4.0: TNG's sizes, asked through its Papyrus functions (TNG_PapyrusUtil): the player's size category, and the scale
+	// of each of the five categories as set in TNG's MCM
+	std::mutex            g_tngLock;
+	DeepFit::TngSizes     g_tng;
+	std::atomic<bool>     g_tngAsk{ true };
+
+	class PapyrusResult : public BSScript::IStackCallbackFunctor
+	{
+	public:
+		explicit PapyrusResult(std::function<void(const BSScript::Variable&)> a_f) : f(std::move(a_f)) {}
+		void operator()(BSScript::Variable a_result) override { if (f) f(a_result); }
+		void SetObject(const BSTSmartPointer<BSScript::Object>&) override {}
+		std::function<void(const BSScript::Variable&)> f;
+	};
+
+	void askTng()
+	{
+		auto* vm = BSScript::Internal::VirtualMachine::GetSingleton();
+		auto* pc = PlayerCharacter::GetSingleton();
+		if (!vm || !pc)
+			return;
+		{
+			BSTSmartPointer<BSScript::IStackCallbackFunctor> cb(new PapyrusResult([](const BSScript::Variable& v) {
+				if (!v.IsInt())
+					return;
+				std::lock_guard lk(g_tngLock);
+				const int s = v.GetSInt();
+				g_tng.mine = (s >= 0 && s <= 4) ? s : -1;
+				g_tng.fromTng = true;
+			}));
+			auto* args = MakeFunctionArguments(static_cast<Actor*>(pc));
+			vm->DispatchStaticCall("TNG_PapyrusUtil", "GetActorSize", args, cb);
+		}
+		for (int i = 0; i < 5; ++i) {
+			BSTSmartPointer<BSScript::IStackCallbackFunctor> cb(new PapyrusResult([i](const BSScript::Variable& v) {
+				if (!v.IsFloat())
+					return;
+				const float k = v.GetFloat();
+				if (k > 0.05f && k < 5.0f) {
+					std::lock_guard lk(g_tngLock);
+					g_tng.scale[i] = k;
+				}
+			}));
+			auto* args = MakeFunctionArguments(static_cast<std::int32_t>(i));
+			vm->DispatchStaticCall("TNG_PapyrusUtil", "GetFloatValue", args, cb);
+		}
+	}
+
+	// 0.4.0: the test schlong made visible - a plain round one, built from short pieces of DeepFit's own mesh (Data/meshes/
+	// DeepFit\TestShaft.nif and TestShaftTip.nif) hung on the player's head, along his mouth
+	NiPointer<NiNode>  g_testRoot, g_testSeg, g_testTip;
+	std::vector<NiPointer<NiAVObject>> g_testPieces;
+	NiPointer<NiAVObject> g_testTipPiece;
+	bool               g_testLoadTried = false;
+
+	void hideTestShaft()
+	{
+		if (g_testRoot && g_testRoot->parent)
+			g_testRoot->parent->DetachChild(g_testRoot.get());
+	}
+
+	void updateTestShaft(Receiver& r)
+	{
+		const auto& pv = g_preview;
+		if (!pv.on || !pv.show || !r.head) {
+			hideTestShaft();
+			return;
+		}
+		if (!g_testLoadTried) {
+			g_testLoadTried = true;
+			BSModelDB::DBTraits::ArgsType args{};
+			NiPointer<NiNode> a, b;
+			if (BSModelDB::Demand("DeepFit\\TestShaft.nif", a, args) == BSResource::ErrorCode::kNone && a &&
+				BSModelDB::Demand("DeepFit\\TestShaftTip.nif", b, args) == BSResource::ErrorCode::kNone && b) {
+				g_testSeg = a;
+				g_testTip = b;
+			} else
+				logs::warn("DeepFit: the test schlong's meshes (meshes\\DeepFit\\TestShaft*.nif) did not load");
+		}
+		if (!g_testSeg || !g_testTip)
+			return;
+		auto* head = r.head->AsNode();
+		if (!head)
+			return;
+		if (!g_testRoot) {
+			g_testRoot = NiPointer<NiNode>(NiNode::Create(0));
+			g_testRoot->name = "DeepFit TestShaft";
+			if (auto* t = static_cast<NiAVObject*>(g_testTip->Clone())) {
+				g_testTipPiece = NiPointer<NiAVObject>(t);
+				g_testRoot->AttachChild(t, true);
+			}
+		}
+		if (g_testRoot->parent != head) {
+			hideTestShaft();
+			head->AttachChild(g_testRoot.get(), true);
+		}
+		// its frame: x his left, y into his mouth, z up, from the middle of his lips
+		// (0.4.1: placed and angled as the test page says - the same as the points the lips fit)
+		const NiPoint3 o0 = previewPlace(NiPoint3(0, 0, 0));
+		auto toWorld = [&](const NiPoint3& f) { const NiPoint3 g = previewPlace(f) - o0; return r.fx * g.x + r.fy * g.y + r.fz * g.z; };
+		const NiPoint3 ax = toWorld(NiPoint3(-1, 0, 0)), ay = toWorld(NiPoint3(0, -1, 0)), az = toWorld(NiPoint3(0, 0, 1));
+		const NiPoint3 origin = r.mouthC + r.fx * o0.x + r.fy * o0.y + r.fz * o0.z;
+		NiMatrix3      W;
+		for (int i = 0; i < 3; ++i) {
+			const float a[3] = { ax.x, ax.y, ax.z }, b[3] = { ay.x, ay.y, ay.z }, c[3] = { az.x, az.y, az.z };
+			W.entry[i][0] = a[i];
+			W.entry[i][1] = b[i];
+			W.entry[i][2] = c[i];
+		}
+		const NiTransform& H = head->world;
+		const float        inv = H.scale > 1e-6f ? 1.0f / H.scale : 1.0f;
+		g_testRoot->local.rotate = H.rotate.Transpose() * W;
+		g_testRoot->local.translate = (H.rotate.Transpose() * (origin - H.translate)) * inv;
+		g_testRoot->local.scale = inv;
+		// the pieces: from 3 units in front of his lips to the tip (a rounded end)
+		const float rad = std::max(r.previewR, 0.2f), D = std::max(r.previewD, 0.5f);
+		const float start = -3.0f, tipAt = std::max(D - rad, start);
+		// pieces as long as they are thick, each as thick as the shape is there (0.4.1: a horse's flare and ring, a knot,
+		// a bump show too)
+		std::vector<std::pair<float, float>> at;   // where each piece starts, its thickness
+		for (float y = start; y < tipAt - 0.05f && at.size() < 96;) {
+			const float rr = rad * std::clamp(previewProfile(y + 0.5f * rad, D, r.previewShape), 0.3f, 3.0f);
+			at.emplace_back(std::min(y, tipAt - rr), rr);
+			y += std::max(rr * 0.8f, 0.1f);
+		}
+		const int need = std::max(static_cast<int>(at.size()), 1);
+		while (static_cast<int>(g_testPieces.size()) < need) {
+			auto* c = static_cast<NiAVObject*>(g_testSeg->Clone());
+			if (!c)
+				break;
+			g_testPieces.emplace_back(c);
+			g_testRoot->AttachChild(c, true);
+		}
+		for (int k = 0; k < static_cast<int>(g_testPieces.size()); ++k) {
+			auto* p = g_testPieces[k].get();
+			const bool use = k < need;
+			p->SetAppCulled(!use);
+			if (!use)
+				continue;
+			p->local = NiTransform();
+			if (k < static_cast<int>(at.size())) {
+				p->local.translate = NiPoint3(0.0f, at[k].first, 0.0f);
+				p->local.scale = at[k].second;
+			} else
+				p->SetAppCulled(true);
+		}
+		if (g_testTipPiece) {
+			g_testTipPiece->local = NiTransform();
+			g_testTipPiece->local.translate = NiPoint3(0.0f, tipAt, 0.0f);
+			g_testTipPiece->local.scale = rad * std::clamp(previewProfile(tipAt, D, r.previewShape), 0.3f, 3.0f);
+		}
+		NiUpdateData ud{};
+		g_testRoot->Update(ud);
+	}
+
+	// 0.4.1: the test page tilts the player's head back (chin up) so his throat is easier to see. The animation sets the
+	// head every frame; when it has not this frame (still what we set), the tilt starts from what it was before ours.
+	void tiltHead(Receiver& r, float deg)
+	{
+		auto* h = r.head.get();
+		auto* par = h ? h->parent : nullptr;
+		if (!par)
+			return;
+		auto same = [](const NiMatrix3& a, const NiMatrix3& b) { return std::memcmp(&a, &b, sizeof(NiMatrix3)) == 0; };
+		if (r.tiltSet && same(h->local.rotate, r.tiltLast))
+			h->local.rotate = r.tiltBase;
+		if (deg <= 0.01f) {
+			if (r.tiltSet) {
+				r.tiltSet = false;
+				NiUpdateData ud{};
+				h->Update(ud);
+			}
+			return;
+		}
+		r.tiltBase = h->local.rotate;
+		const float    a = deg * 0.01745329f, c = std::cos(a), s = std::sin(a), t = 1.0f - c;
+		const NiPoint3 u = r.fx;   // about his right: forward turns up
+		NiMatrix3      R;
+		R.entry[0][0] = c + u.x * u.x * t;       R.entry[0][1] = u.x * u.y * t - u.z * s; R.entry[0][2] = u.x * u.z * t + u.y * s;
+		R.entry[1][0] = u.y * u.x * t + u.z * s; R.entry[1][1] = c + u.y * u.y * t;       R.entry[1][2] = u.y * u.z * t - u.x * s;
+		R.entry[2][0] = u.z * u.x * t - u.y * s; R.entry[2][1] = u.z * u.y * t + u.x * s; R.entry[2][2] = c + u.z * u.z * t;
+		const NiMatrix3 world = par->world.rotate * h->local.rotate;
+		h->local.rotate = par->world.rotate.Transpose() * (R * world);
+		r.tiltLast = h->local.rotate;
+		r.tiltSet = true;
+		NiUpdateData ud{};
+		h->Update(ud);
+	}
+
 	// 0.4.0: what DeepFit found, for the menu
 	struct StatusData
 	{
@@ -1554,6 +1835,10 @@ void DeepFit::OnFrame(float delta)
 		delta = 1.0f / 60.0f;
 	g_logTimer += delta;
 	g_clock += delta;
+	if (!g_preview.on)
+		hideTestShaft();
+	if (g_tngAsk.exchange(false))
+		askTng();   // 0.4.0: TNG's sizes (again when the test page asks)
 
 	// collect loaded actors
 	std::vector<Actor*> actors;
@@ -1611,6 +1896,8 @@ void DeepFit::OnFrame(float delta)
 		}
 		r->raceK = main ? cfg.raceStrengthFor(raceId) : 1.0f;
 		nShaft += static_cast<int>(shaft.size());
+		if (recv->IsPlayerRef() && (g_preview.on || r->tiltSet))
+			tiltHead(*r, g_preview.on ? g_preview.tilt : 0.0f);   // 0.4.1
 		if (g_preview.on && recv->IsPlayerRef())
 			solve(*r, shaft, delta, true);   // 0.4.0: the test page
 		else if (shaft.empty())
@@ -1619,6 +1906,8 @@ void DeepFit::OnFrame(float delta)
 			solve(*r, shaft, delta);
 		sendMouth(*r, delta);
 		updateTeeth(*r, recv, delta);
+		if (recv->IsPlayerRef())
+			updateTestShaft(*r);   // 0.4.0: the test schlong, shown
 		if (r->full && main && mainP) {   // 0.4.0: what the menu shows
 			char buf[512];
 			std::snprintf(buf, sizeof(buf), "%s with %s (%s): %s, %s; tip %.1f deep, race strength x%.2f",
@@ -1679,6 +1968,14 @@ const char* DeepFit::KeyText(int a_code, int a_mods)
 }
 
 DeepFit::Preview& DeepFit::GetPreview() { return g_preview; }
+
+DeepFit::TngSizes DeepFit::GetTngSizes()
+{
+	std::lock_guard lk(g_tngLock);
+	return g_tng;
+}
+
+void DeepFit::AskTng() { g_tngAsk = true; }
 
 std::string DeepFit::StatusText(std::string* a_race, float* a_ago)
 {

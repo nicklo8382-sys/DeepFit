@@ -147,18 +147,60 @@ namespace DeepFit::Menu
 			Check("Show a test schlong in my mouth", &pv.on);
 			Help("A made-up schlong goes into the player's mouth, so you can tune the mouth and throat here without starting a scene. Not saved - switch it off when done. Needs a head built for DeepFit on the player.");
 			if (pv.on) {
+				Check("Show it", &pv.show);
+				Help("A plain schlong is shown in his mouth where the test one is (only its thickness and depth - the shapes below are felt by the mouth and throat, not drawn).");
 				Slider("Tip depth", &pv.depth, 0.5f, 16.0f, "%.1f units past the lips");
-				Slider("Half its height", &pv.thick, 0.4f, 3.0f, "%.2f");
-				Slider("Half its width", &pv.width, 0.4f, 3.5f, "%.2f");
-				static const char* kShapes[] = { "Plain", "Horse (flare and medial ring)", "Knot", "Ridged", "Segmented" };
-				ImGuiMCP::Text("%s", T("Shape:"));
-				for (int i = 0; i < 5; ++i) {
-					if (i > 0)
+				{
+					const auto ts = DeepFit::GetTngSizes();
+					static const char* kSizes[] = { "XS", "S", "M", "L", "XL" };
+					ImGuiMCP::Text("%s", T("Size:"));
+					ImGuiMCP::SameLine();
+					if (ImGuiMCP::RadioButton(T("Sliders"), pv.size < 0))
+						pv.size = -1;
+					ImGuiMCP::SameLine();
+					if (ImGuiMCP::RadioButton(T("Mine (TNG)"), pv.size == 5)) {
+						pv.size = 5;
+						DeepFit::AskTng();
+					}
+					for (int i = 0; i < 5; ++i) {
 						ImGuiMCP::SameLine();
-					if (ImGuiMCP::RadioButton(T(kShapes[i]), pv.shape == i))
-						pv.shape = i;
+						if (ImGuiMCP::RadioButton(kSizes[i], pv.size == i))
+							pv.size = i;
+					}
+					Help("A plain schlong the size of one of TNG's size categories (scaled as set in TNG's MCM), or of the player's own TNG size. Sliders: the height, width and shape below.");
+					if (pv.size == 5)
+						ImGuiMCP::TextDisabled(T("Your TNG size: %s (x%.2f)%s"), ts.mine >= 0 ? kSizes[ts.mine] : "?", ts.scale[ts.mine >= 0 ? ts.mine : 2],
+							ts.fromTng ? "" : T(" - TNG did not answer, M used"));
+				}
+				if (pv.size < 0) {
+					Slider("Half its height", &pv.thick, 0.4f, 3.0f, "%.2f");
+					Slider("Half its width", &pv.width, 0.4f, 3.5f, "%.2f");
+					static const char* kShapes[] = { "Plain", "Horse (flare and medial ring)", "Knot", "Ridged", "Segmented", "Bump" };
+					ImGuiMCP::Text("%s", T("Shape:"));
+					for (int i = 0; i < 6; ++i) {
+						if (i > 0)
+							ImGuiMCP::SameLine();
+						if (ImGuiMCP::RadioButton(T(kShapes[i]), pv.shape == i))
+							pv.shape = i;
+					}
+					if (pv.shape == 5) {
+						Slider("Bump along it", &pv.bumpAt, 0.0f, 1.0f, "%.2f (0 base, 1 tip)");
+						Slider("Bump size", &pv.bumpSize, 0.1f, 1.5f, "x%.2f thicker");
+					}
 				}
 				Check("Goes in and out", &pv.strokes);
+				if (pv.strokes) {
+					Slider("Stroke speed", &pv.speed, 0.1f, 3.0f, "%.2f a second");
+					Slider("Stroke length", &pv.strokeLen, 0.05f, 0.8f, "%.2f of the depth");
+				}
+				Slider("Enters higher", &pv.up, -2.0f, 2.0f, "%.2f units");
+				Slider("Enters to his right", &pv.side, -2.0f, 2.0f, "%.2f units");
+				Slider("Tip up", &pv.pitch, -40.0f, 40.0f, "%.0f degrees");
+				Slider("Tip to his right", &pv.yaw, -40.0f, 40.0f, "%.0f degrees");
+				Help("Places and angles the test schlong in his mouth (negative = lower / to his left / tip down). The lips, cheeks and throat fit it where it is, the same as a real one.");
+				if (ImGuiMCP::Button(T("Centre it"))) { pv.up = pv.side = pv.pitch = pv.yaw = 0.0f; }
+				Slider("Tilt my head back", &pv.tilt, 0.0f, 45.0f, "%.0f degrees");
+				Help("Tilts the player's head back (chin up) while testing, so the throat bulge is easier to see.");
 			}
 
 			Section("Mouth");
@@ -195,6 +237,10 @@ namespace DeepFit::Menu
 			ch |= Slider("Close in round a slim shaft", &c.lipCloseMax, 0.0f, 4.0f, "%.2f");
 			ch |= Slider("Upper lip, at most", &c.upperLipMax, 0.0f, 3.0f, "%.1f");
 			ch |= Slider("Upper lip down", &c.upperLipDown, 0.0f, 1.2f, "%.2f");
+			ch |= Slider("Lower lip up", &c.lowerLipUp, 0.0f, 1.2f, "%.2f");
+			Help("While the mouth is full the lower lip is pushed up this far (its middle fully, the sides a little less), closer round the shaft.");
+			ch |= Check("Open to the shaft's real thickness", &c.lipsAlongShaft);
+			Help("The mouth opens to the shaft measured straight across it. Off: measured straight up and down his face, so a shaft going in at an angle opens it wider (as before 0.4.1).");
 			Help("While the mouth is full the upper lip is pulled down this far (its middle fully, the sides a little less) - the lip-round morph peaks it up towards the nose.");
 			ch |= Slider("Lower lip, at most", &c.lowerLipMax, 0.0f, 4.5f, "%.1f");
 			ch |= Slider("Corners, at most", &c.cornerMax, 0.0f, 2.5f, "%.1f");
