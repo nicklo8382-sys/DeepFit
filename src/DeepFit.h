@@ -27,6 +27,9 @@ namespace DeepFit
 		bool  fromTng = false;
 	};
 	TngSizes GetTngSizes();
+	int      SoundCount(const char* a_kind);
+	bool     AnatomicaFound();   // 0.4.4   // 0.4.4: sound files found for gulp / gag / gasp
+	void     RescanSounds();
 	void     AskTng();          // asks TNG again (on the game's thread, next frame)
 	Preview& GetPreview();
 	std::string StatusText(std::string* a_race = nullptr, float* a_ago = nullptr);   // 0.4.0: what DeepFit last found (the menu)

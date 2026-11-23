@@ -90,6 +90,9 @@ struct Config
 	float lipCloseMax = 2.0f;      // lips may close in this far (round a slim shaft once the jaw is open)
 	float lowerLipUp = 0.0f;       // 0.4.1: the lower lip pushed up this far while the mouth is full
 	bool  lipsAlongShaft = true;   // 0.4.1: the mouth opens to the shaft measured across it (not straight up and down his face)
+	bool  followAim = true;        // 0.4.3: a shaft whose line passes his lips is turned onto them (as PPA aims it)
+	float aimRadius = 10.0f;       // ... when it passes within this many units of them
+	float aimMaxDeg = 45.0f;       // ... turned at most this far
 	float upperLipDown = 0.6f;     // 0.3.3: the upper lip pulled down this far while the mouth is full (the lip morph peaks it up to the nose)
 	float noseFollow = 0.5f;       // nose base rises by this fraction of the upper-lip-center push
 	float noseMax = 0.5f;
@@ -103,8 +106,34 @@ struct Config
 	float throatSlabZ = 1.2f;       // +- height band around the throat bone
 	float throatSlabX = 2.0f;       // +- sideways band around the throat bone
 
-	static Config& get();
+	// 0.4.4: his schlong's shape found by DeepFit itself (without Anatomica - with it, Anatomica says)
+	bool  detectShapes = true;
+	float shapeFlare = 0.8f;       // a flared head swells this much more just behind the tip (units)
+	float shapeKnotOpen = 1.5f;    // a knot all the way in opens his mouth this much more (units)
+
+	// 0.4.4: an extra push - now and then, at the deepest point of a stroke, the bulge goes further down his throat
+	bool  extraPush = true;
+	float extraDepth = 4.0f;       // units deeper
+	float extraChance = 0.25f;     // the chance each stroke (1 = every stroke)
+	float extraHold = 0.8f;        // seconds it stays there
+
+	// 0.4.4: sounds (Data\Sound\Fx\DeepFit\<gulp / gag / gasp>; a swallow falls back to Anatomica's gulps)
+	float soundGulp = 0.8f;        // volume of a swallow (0 = off)
+	float soundGag = 0.8f;         // a gag
+	float soundGasp = 0.6f;        // a breath after he pulls out
+	bool  soundOwnOnly = true;     // only DeepFit's own swallows and gags (Anatomica plays its own)
+
+	bool           isFemale = false;   // 0.4.4: the women's set
+	static Config& get();               // the main (men's) set, and every shared setting
+	static Config& female();            // 0.4.4: women's heads built for DeepFit
+	static Config& of(bool a_female) { return a_female ? female() : get(); }
+	static bool    isLookKey(const std::string& k);
 	void           load();
 	void           save();            // 0.3.0: the in-game menu writes its changes back to DeepFit.ini (keeps the comments)
 	void           resetDefaults();   // 0.3.1: every setting back to as installed (the key and the debug log are kept)
+	bool           loadFile(const std::string& path, bool lookOnly);   // 0.4.4: a preset file too
+	bool           saveTo(const std::string& path, bool lookOnly) const;
+	void           applyKey(const std::string& k, const std::string& v);
+	std::vector<std::pair<std::string, std::string>> keyValues(bool lookOnly) const;
+	static void    syncFromMain();
 };

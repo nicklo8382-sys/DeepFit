@@ -2,6 +2,8 @@
 #include <functional>
 #include <cctype>
 #include <mutex>
+#include <random>
+#include <filesystem>
 #include "DeepFit.h"
 #include "Config.h"
 #include <iterator>
@@ -91,6 +93,16 @@ namespace
 		"DF_ThroatKnob1", "DF_ThroatKnob2", "DF_ThroatKnob3", "DF_ThroatKnob4", "DF_ThroatKnob5",
 		"DF_ThroatKnob6", "DF_ThroatKnob7", "DF_ThroatKnob8", "DF_ThroatKnob9", "DF_ThroatKnob10" };
 
+	// 0.4.4: DF_Throat / DF_ThroatWideT / DF_ThroatRidge / DF_ThroatKnob are 3 units at 100 in the head (were 1): every
+	// value DeepFit works out for them (in units x 100) is sent as a third, so a big bulge no longer hits MFEE's limit of
+	// 100 (all shapes looked the same, flattened at 1 unit)
+	constexpr float kThroatScale = 3.0f;
+	constexpr bool throatScaled(int m)
+	{
+		return (m >= kBand0 && m < kBand0 + kBands) || (m >= kWideT0 && m < kWideT0 + kBands) || (m >= kRidge0 && m < kRidge0 + kBands) ||
+		       (m >= kKnob0 && m < kKnob0 + kBands);
+	}
+
 	struct Receiver
 	{
 		NiAVObject*           root = nullptr;  // identity of the 3D we cached from
@@ -135,7 +147,13 @@ namespace
 		NiMatrix3              tiltBase, tiltLast;
 		bool                   teethTold = false;
 		bool                   axesOk = false;
-		bool                   inScene = false;    // 0.4.2: a partner's schlong near him this frame (in a scene)   // 0.4.2: fx/fy/fz found from his mouth (until then his head bone's axes)
+		bool                   inScene = false;
+		float                  extraCur = 0.0f, prevVel = 0.0f;   // 0.4.4: an extra push (how much deeper it goes now)
+		double                 extraUntil = -1e9;
+		bool                   shapeFromAnatomica = false;   // 0.4.4: the shape came from Anatomica (else DeepFit found it)
+		float                  knotOpen = 0.0f;
+		bool                   female = false;   // 0.4.4: a woman's head built for DeepFit - her own settings
+		double                 gulpSounded = -1e9, gagSounded = -1e9, gaspSounded = -1e9;   // 0.4.4    // 0.4.2: a partner's schlong near him this frame (in a scene)   // 0.4.2: fx/fy/fz found from his mouth (until then his head bone's axes)
 	};
 
 	struct ShaftVert
@@ -169,6 +187,9 @@ namespace
 		float                   meshOff = 0.0f;
 		bool                    anyMesh = false;   // 0.4.0: nothing recognisable - his whole mesh is read (only what reaches the lips counts)
 		std::string             source;            // 0.4.0: how he was read, for the menu
+		int                     kind = -1;         // 0.4.4: his schlong's shape, found by DeepFit itself (-1 not looked yet)
+		std::string             kindWhy;
+		float                   kindAge = 0.0f;
 	};
 
 	// his schlong's bones, base to tip
@@ -282,6 +303,7 @@ namespace
 	std::atomic<bool>                    g_capture{ false };   // 0.3.1: the menu waits for the Mega mouth key
 	int                                  g_mods = 0;           // Shift 1 / Ctrl 2 / Alt 4 held now
 	std::unordered_map<FormID, Receiver> g_receivers;
+	std::mt19937                         g_rng{ std::random_device{}() };   // 0.4.4 (extra push, sounds)
 	double                               g_clock = 0.0;   // 0.4.0: seconds since the game started (for gulps / gags)
 	DeepFit::Preview                     g_preview;        // 0.4.0: the menu's test page
 	std::unordered_map<FormID, Partner>  g_partners;
@@ -758,7 +780,7 @@ namespace
 
 	void solve(Receiver& r, const std::vector<NiPoint3>& shaft, float delta, bool preview = false)
 	{
-		auto& cfg = Config::get();
+		auto& cfg = Config::of(r.female);
 		r.full = false;
 
 		// rest world position of every driven bone
@@ -920,7 +942,10 @@ namespace
 			const float restWidth = (r.bones[6].valid && r.bones[7].valid) ? len(rest[7] - rest[6]) : 4.0f;
 			float want[kMorphs] = {};
 			if (through || (inMouth && DeepFit::MegaMouthNow())) {   // 0.3.1: Mega mouth opens fully as soon as it is in his mouth
-				const float open = height + cfg.mouthExtra;
+				// 0.4.4: a knotted schlong all the way in: the knot at his lips opens his mouth further
+				const bool knotIn = g_clock - r.shapeAt < 5.0 && r.shape == 4 && depth > cfg.throatFrom + cfg.autoDeep;
+				r.knotOpen += ((knotIn ? cfg.shapeKnotOpen : 0.0f) - r.knotOpen) * (1.0f - std::exp(-delta * 4.0f));
+				const float open = height + cfg.mouthExtra + r.knotOpen;
 				want[0] = DeepFit::MegaMouthNow() ? cfg.morphMax : open / std::max(cfg.jawUnits, 0.1f) * 100.0f;
 				want[1] = DeepFit::MegaMouthNow() ? cfg.morphMax * cfg.lipRound : open * 0.5f / std::max(cfg.lipUnits, 0.1f) * 100.0f * cfg.lipRound;
 				// 0.3.8: the corners go out to the sides too - to the shaft's width (plus MouthExtra) and a share of how far
@@ -1009,11 +1034,16 @@ namespace
 				float tip = -1.0f;   // how far in the tip is (the deepest bin with shaft in it)
 				for (int b = kBins - 1; b >= 0; --b)
 					if (zHi[b] >= zLo[b]) { tip = (b + 1) * 0.5f; break; }
+				// 0.4.4: an extra push - the whole shaft read that much deeper, so the bulge goes further down his throat
+				const float ex = tip > 0.0f ? r.extraCur : 0.0f;
+				if (ex > 0.0f)
+					tip += ex;
 				float raw[kBands], reachK[kBands];
 				for (int k = 0; k < kBands; ++k) {
 					const float s = cfg.throatFrom + (k + 0.5f) * cfg.throatBand;
 					const float lo = s - 0.25f * cfg.throatBand, hi = s + 0.25f * cfg.throatBand;
-					const float rz = std::max(halfH(lo), halfH(hi)), rx = std::max(halfW(lo), halfW(hi));
+					const float lo2 = std::max(lo - ex, 0.25f), hi2 = std::max(hi - ex, 0.25f);
+					const float rz = std::max(halfH(lo2), halfH(hi2)), rx = std::max(halfW(lo2), halfW(hi2));
 					// eased in over the last three bands before the tip: a rounded end, not a cut-off (0.3.8: the swelling
 					// tapers there too - it used to stay full right up to the tip, a spike in the middle of his throat)
 					float reach = std::clamp((tip - (s - 0.5f * cfg.throatBand)) / (3.0f * cfg.throatBand), 0.0f, 1.0f);
@@ -1037,6 +1067,15 @@ namespace
 							if (raw[k] > 0.0f) raw[k] = std::clamp(mid + (raw[k] - mid) * cfg.throatDetail, 0.0f, cfg.throatShapeMax);
 					}
 				}
+				// 0.4.4: a horse's flared head shows down his throat even when his mesh does not read as flared (a shaft
+				// built round his bones, a plain mesh): it swells just behind the tip
+				if (g_clock - r.shapeAt < 5.0 && r.shape == 3 && cfg.shapeFlare > 0.0f && tip > 0.0f)
+					for (int k = 0; k < kBands; ++k) {
+						const float s = cfg.throatFrom + (k + 0.5f) * cfg.throatBand;
+						const float d = tip - s;   // how far behind the tip
+						if (reachK[k] > 0.0f)
+							raw[k] = std::min(raw[k] + cfg.shapeFlare * std::exp(-std::pow((d - 0.9f) / 0.8f, 2.0f)), cfg.throatShapeMax + cfg.shapeFlare);
+					}
 				for (int k = 0; k < kBands; ++k)   // 0.3.8: tapered towards the tip (after the shape is brought out)
 					raw[k] *= reachK[k];
 				// 0.4.0: what measuring cannot see - a ridged schlong's ridge, a segmented one's knobs (Anatomica says which,
@@ -1084,6 +1123,12 @@ namespace
 				r.leftJaw = r.morph[0];
 				const float dk = std::clamp((depth - 2.0f) / std::max(cfg.throatFrom + 4.0f, 1.0f), 0.0f, 1.0f);
 				r.depthK += (dk - r.depthK) * (1.0f - std::exp(-delta * 6.0f));
+				// 0.4.4: an extra push - at the deepest point of a stroke (pushing in, then stopping), now and then (a chance
+				// each stroke) it goes ExtraDepth further for a moment
+				if (cfg.extraPush && r.prevVel > 3.0f && r.vel <= 0.5f && depth > cfg.throatFrom &&
+					std::uniform_real_distribution<float>(0.0f, 1.0f)(g_rng) < cfg.extraChance)
+					r.extraUntil = g_clock + cfg.extraHold;
+				r.prevVel = r.vel;
 				// a gag or a swallow by itself (Anatomica's own, when it sends them, come first)
 				if (cfg.autoGagGulp && g_clock - r.extAt > 10.0) {
 					const bool deep = depth > cfg.throatFrom + cfg.autoDeep;
@@ -1121,11 +1166,17 @@ namespace
 						r.gulpAt = g_clock;
 				}
 			}
+			{   // 0.4.4: the extra push eases in quickly and back out slowly
+				const float to = (cfg.extraPush && r.full && g_clock < r.extraUntil) ? cfg.extraDepth : 0.0f;
+				r.extraCur += (to - r.extraCur) * (1.0f - std::exp(-delta * (to > r.extraCur ? 10.0f : 3.0f)));
+				if (r.extraCur < 0.01f)
+					r.extraCur = 0.0f;
+			}
 			// the lips drag with it: rolled out as he pulls back, tucked in as he pushes in
 			r.dragWant = r.full ? std::clamp(-r.vel / std::max(cfg.lipDragSpeed, 1.0f), -1.0f, 1.0f) * cfg.lipDrag : 0.0f;
 			const float km = 1.0f - std::exp(-delta * 10.0f);
 			for (int m = 0; m < kMorphs; ++m) {
-				want[m] = std::clamp(want[m], 0.0f, cfg.morphMax);
+				want[m] = std::clamp(want[m], 0.0f, cfg.morphMax * (throatScaled(m) ? kThroatScale : 1.0f));
 				r.morph[m] += (want[m] - r.morph[m]) * km;
 			}
 			r.teeth = cfg.teethOpen && (through || inMouth);
@@ -1186,12 +1237,14 @@ namespace
 				}
 				float mx = mxLip;
 				if (DeepFit::MouthNow()) {   // 0.2.0: the morphs opened the mouth; the bones fit the lips to the shaft (out, or back in round a slim one)
-					target[i] = sMax > -1e8f ? std::clamp(sMax + cfg.lipMargin + cfg.stretch - sRest - comp[i], DeepFit::MegaMouthNow() ? 0.0f : -cfg.lipCloseMax, mx) : 0.0f;
+					// (0.4.2: closing in round a slim shaft only when it is in his mouth - a shaft just under his chin pulled
+					// his upper lip 5 units in)
+					target[i] = sMax > -1e8f ? std::clamp(sMax + cfg.lipMargin + cfg.stretch - sRest - comp[i], (DeepFit::MegaMouthNow() || !inMouth) ? 0.0f : -cfg.lipCloseMax, mx) : 0.0f;
 					// 0.3.3: the lip-round morph peaks the middle of the upper lip up towards the nose - pull it back down
-					if (spec.kind == Kind::Lip && spec.dir.z > 0.0f && (sMax > -1e8f || inMouth) && cfg.upperLipDown > 0.0f)
+					if (spec.kind == Kind::Lip && spec.dir.z > 0.0f && inMouth && cfg.upperLipDown > 0.0f)
 						target[i] -= cfg.upperLipDown * (i == kUpperCenter ? 1.0f : 0.6f);
 					// 0.4.1: and the lower lip up (the jaw morph drops it further than the shaft needs)
-					if (spec.kind == Kind::Lip && spec.dir.z < 0.0f && (sMax > -1e8f || inMouth) && cfg.lowerLipUp > 0.0f)
+					if (spec.kind == Kind::Lip && spec.dir.z < 0.0f && inMouth && cfg.lowerLipUp > 0.0f)
 						target[i] -= cfg.lowerLipUp * (i == kBottomCenter ? 1.0f : 0.6f);
 				} else {
 					target[i] = sMax > -1e8f ? std::clamp(sMax + cfg.lipMargin + cfg.stretch - sRest, 0.0f, mx) : 0.0f;
@@ -1259,7 +1312,7 @@ namespace
 
 	void relax(Receiver& r, float delta)
 	{
-		auto& cfg = Config::get();
+		auto& cfg = Config::of(r.female);
 		r.full = false;
 		r.depthPrev = -1.0f;
 		r.vel *= std::exp(-delta * 6.0f);
@@ -1348,6 +1401,7 @@ namespace
 					} else {
 						r.shape = static_cast<int>(a_event->numArg + 0.5f);
 						r.shapeAt = g_clock;
+						r.shapeFromAnatomica = true;
 					}
 				}
 			} else if (name == "DeepFit_Mouth") {
@@ -1358,11 +1412,165 @@ namespace
 		}
 	};
 
+	// 0.4.4: sounds - a swallow, a gag, a breath after he pulls out. WAV / XWM files in Data\\Sound\\Fx\\DeepFit\\<gulp / gag /
+	// gasp> (any number, one picked at random); with none for swallows, Anatomica's gulps are used
+	struct SoundKind
+	{
+		std::vector<std::string> files;
+		int                      last = -1;
+		bool                     looked = false;
+	};
+	std::unordered_map<std::string, SoundKind> g_sounds;
+	std::mutex                                 g_soundLock;   // (the menu counts the files too)
+
+	SoundKind& lookSounds(const std::string& kind)
+	{
+		auto& k = g_sounds[kind];
+		if (k.looked)
+			return k;
+		k.looked = true;
+		auto scan = [&](const char* dirName) {
+			std::error_code ec;
+			const std::filesystem::path dir = std::filesystem::path("Data/Sound/Fx") / dirName / kind;
+			for (auto it = std::filesystem::directory_iterator(dir, ec); !ec && it != std::filesystem::directory_iterator(); it.increment(ec)) {
+				if (!it->is_regular_file(ec))
+					continue;
+				std::string ext = it->path().extension().string();
+				for (auto& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+				if (ext == ".wav" || ext == ".xwm")
+					k.files.push_back(std::string("Sound\\Fx\\") + dirName + "\\" + kind + "\\" + it->path().filename().string());
+			}
+		};
+		scan("DeepFit");
+		if (k.files.empty() && kind == "gulp")
+			scan("Anatomica");
+		std::sort(k.files.begin(), k.files.end());
+		logs::info("DeepFit: {} sound file(s) for \"{}\"", k.files.size(), kind);
+		return k;
+	}
+
+	void playSound(const char* kind, Actor* a, float volume)
+	{
+		auto* am = BSAudioManager::GetSingleton();
+		if (!a || !am || volume <= 0.0f)
+			return;
+		std::string file;
+		{
+			std::lock_guard lk(g_soundLock);
+			auto& k = lookSounds(kind);
+			if (k.files.empty())
+				return;
+			int i = std::uniform_int_distribution<int>(0, static_cast<int>(k.files.size()) - 1)(g_rng);
+			if (k.files.size() > 1 && i == k.last)
+				i = (i + 1) % static_cast<int>(k.files.size());
+			k.last = i;
+			file = k.files[static_cast<std::size_t>(i)];
+		}
+		BSResource::ID id;
+		id.GenerateFromPath(file.c_str());
+		BSSoundHandle h;
+		am->GetSoundHandleByFile(h, id, 0x1A, 0);
+		if (!h.IsValid())
+			return;
+		auto* root = a->Get3D(false);
+		if (auto* at = root ? root->GetObjectByName("NPC Head [Head]") : nullptr)
+			h.SetObjectToFollow(at);
+		else
+			h.SetPosition(a->GetPosition());
+		h.SetVolume(std::clamp(volume, 0.0f, 2.0f));
+		h.SetFrequency(std::uniform_real_distribution<float>(0.94f, 1.06f)(g_rng));
+		h.Play();
+	}
+
+	// each new swallow / gag / pull-out once (Anatomica's own swallows and gags are left to it unless asked)
+	void soundsFor(Receiver& r, Actor* a)
+	{
+		const auto& cfg = Config::of(r.female);
+		auto own = [&](double at) { return std::fabs(at - r.extAt) > 1e-6; };
+		if (r.gulpAt > r.gulpSounded) {
+			r.gulpSounded = r.gulpAt;
+			if (g_clock - r.gulpAt < 0.5 && (own(r.gulpAt) || !cfg.soundOwnOnly))
+				playSound("gulp", a, cfg.soundGulp);
+		}
+		if (r.gagAt > r.gagSounded) {
+			r.gagSounded = r.gagAt;
+			if (g_clock - r.gagAt < 0.5 && (own(r.gagAt) || !cfg.soundOwnOnly))
+				playSound("gag", a, cfg.soundGag);
+		}
+		if (r.leftAt > r.gaspSounded) {
+			r.gaspSounded = r.leftAt;
+			if (g_clock - r.leftAt < 0.5)
+				playSound("gasp", a, cfg.soundGasp);
+		}
+	}
+
+	// 0.4.2: what his face should show (eyes / brows), per actor; set by the frame task, put on in the animation update
+	struct FaceWant
+	{
+		float want[8] = {};
+	};
+	struct FaceState
+	{
+		float want[8] = {}, base[8] = {}, sent[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
+		bool  on = false, wanted = false;
+	};
+	std::mutex                              g_faceLock;
+	std::unordered_map<FormID, FaceState>   g_face;
+	std::atomic<int>                        g_faceN{ 0 };
+
+	void setFaceWant(FormID id, const FaceWant& fw)
+	{
+		bool any = false;
+		for (float w : fw.want)
+			any |= w > 0.01f;
+		std::lock_guard lk(g_faceLock);
+		auto it = g_face.find(id);
+		if (it == g_face.end()) {
+			if (!any)
+				return;
+			it = g_face.emplace(id, FaceState{}).first;
+			g_faceN = static_cast<int>(g_face.size());
+		}
+		std::copy(std::begin(fw.want), std::end(fw.want), it->second.want);
+		it->second.wanted = any;
+	}
+
+	// right after the game poses him: over whatever OStim's expression / the blinking set (never below it)
+	void applyFace(Actor* a)
+	{
+		if (g_faceN.load(std::memory_order_relaxed) == 0 || !a)
+			return;
+		std::lock_guard lk(g_faceLock);
+		auto it = g_face.find(a->GetFormID());
+		if (it == g_face.end())
+			return;
+		auto& f = it->second;
+		auto* fg = a->GetFaceGenAnimationData();
+		if (!fg || !fg->modifierKeyFrame.values || fg->modifierKeyFrame.count < 8)
+			return;
+		auto* vals = fg->modifierKeyFrame.values;
+		for (std::uint32_t i = 0; i < 8; ++i) {
+			if (i == 2 || i == 3)
+				continue;
+			const float cur = vals[i];
+			if (std::fabs(cur - f.sent[i]) > 1e-3f)
+				f.base[i] = cur;   // someone else set it since: that is what we go over
+			const float out = f.wanted ? std::max(f.base[i], f.want[i]) : f.base[i];
+			fg->modifierKeyFrame.SetValue(i, out);
+			f.sent[i] = out;
+		}
+		f.on = f.wanted;
+		if (!f.on) {   // given back: forget him
+			g_face.erase(it);
+			g_faceN = static_cast<int>(g_face.size());
+		}
+	}
+
 	// 0.2.0: hand the mouth morphs to MFEE (its Papyrus function, on the game thread we run on) and the teeth modifier
 	// to the face; only when a value has really changed, at most 20 times a second
 	void sendMouth(Receiver& r, float delta)
 	{
-		auto& cfg = Config::get();
+		auto& cfg = Config::of(r.female);
 		if (!DeepFit::MouthNow())
 			return;
 		auto act = r.actor.get();
@@ -1372,34 +1580,20 @@ namespace
 			fg->modifierKeyFrame.SetValue(12, r.teeth ? 1.0f : 0.0f);
 			r.teethSent = r.teeth;
 		}
-		// 0.4.0: his face reacts - eyes close and brows lift the deeper it goes, eyes clench and brows knit in a gag
-		if (auto* fg = act->GetFaceGenAnimationData(); fg && fg->modifierKeyFrame.values && fg->modifierKeyFrame.count >= 8) {
-			float want[8] = {};
+		// 0.4.0: his face reacts - eyes close and brows lift the deeper it goes, eyes clench and brows knit in a gag.
+		// 0.4.2: worked out here, put on his face in the game's animation update (setFace); written from here they were
+		// overwritten by OStim's expressions / blinking in some frames and not others - the eyes and brows flickered
+		{
+			FaceWant fw;
 			if (cfg.faceReact) {
 				const double tk = g_clock - r.gagAt;
 				const float  gag = (cfg.gagTime > 0.0f && tk >= 0.0 && tk < cfg.gagTime) ? std::sin(3.14159f * static_cast<float>(tk / cfg.gagTime)) * std::min(r.gagK, 1.0f) : 0.0f;
 				const float  eyes = std::clamp(cfg.faceEyes * r.depthK + cfg.faceGag * gag, 0.0f, 1.0f);
-				want[0] = want[1] = eyes;                                                       // blink left / right
-				want[4] = want[5] = std::clamp(cfg.faceGag * gag * 0.8f, 0.0f, 1.0f);           // brows in
-				want[6] = want[7] = std::clamp(cfg.faceBrows * r.depthK * (1.0f - gag), 0.0f, 1.0f);   // brows up
+				fw.want[0] = fw.want[1] = eyes;                                                       // blink left / right
+				fw.want[4] = fw.want[5] = std::clamp(cfg.faceGag * gag * 0.8f, 0.0f, 1.0f);           // brows in
+				fw.want[6] = fw.want[7] = std::clamp(cfg.faceBrows * r.depthK * (1.0f - gag), 0.0f, 1.0f);   // brows up
 			}
-			bool any = false;
-			for (float w : want)
-				any |= w > 0.01f;
-			if (any || r.faceOn) {
-				auto* vals = fg->modifierKeyFrame.values;
-				for (std::uint32_t i = 0; i < 8; ++i) {
-					if (i == 2 || i == 3)
-						continue;
-					const float cur = vals[i];
-					if (std::fabs(cur - r.faceSent[i]) > 1e-3f)
-						r.faceBase[i] = cur;   // someone else (OStim's expressions, blinking) set it: that is what we go over
-					const float out = any ? std::max(r.faceBase[i], want[i]) : r.faceBase[i];
-					fg->modifierKeyFrame.SetValue(i, out);
-					r.faceSent[i] = out;
-				}
-				r.faceOn = any;
-			}
+			setFaceWant(act->GetFormID(), fw);
 		}
 		r.sendTimer -= delta;
 		if (r.sendTimer > 0.0f)
@@ -1423,7 +1617,9 @@ namespace
 				extra[kBand0 + k] -= r.morph[kBand0 + k] * std::min(1.0f, cfg.gagSqueeze * env);
 		}
 		for (int m = 0; m < kMorphs; ++m) {
-			const int v = std::max(0, static_cast<int>(std::lround(r.morph[m] + extra[m])));
+			// (0.4.4: the swelling families are 3 units at 100 in the head - a third of the value, so they stay under MFEE's 100)
+			const float raw = (r.morph[m] + extra[m]) / (throatScaled(m) ? kThroatScale : 1.0f);
+			const int   v = std::max(0, static_cast<int>(std::lround(raw)));
 			if (r.sent[m] >= 0 && std::abs(v - r.sent[m]) < 2 && !(v == 0 && r.sent[m] != 0))
 				continue;
 			r.sent[m] = v;
@@ -1444,7 +1640,7 @@ namespace
 	// mode 2 always (only the actors DeepFit fits, and only when chosen).
 	void updateTeeth(Receiver& r, Actor* act, float delta)
 	{
-		auto& cfg = Config::get();
+		auto& cfg = Config::of(r.female);
 		// 0.4.2: only in a scene - 1 while his mouth is full, 2 while a partner's schlong is near him; otherwise they go
 		// back to his head bone exactly as the game has them
 		const bool wantOn = (cfg.teethMove == 2 && r.inScene) || (cfg.teethMove == 1 && r.full);
@@ -1495,7 +1691,7 @@ namespace
 			std::vector<std::string> parts;
 			{
 				std::string cur;
-				for (char c : cfg.teethParts + ",") {
+				for (char c : Config::get().teethParts + ",") {
 					if (c == ',') {
 						while (!cur.empty() && cur.back() == ' ') cur.pop_back();
 						if (!cur.empty()) parts.push_back(cur);
@@ -1633,7 +1829,7 @@ namespace
 						return true;
 					(e1 < 0 ? e1 : e2) = static_cast<int>(e);
 				}
-				logs::warn("DeepFit: the test schlong's mesh meshes\\{} did not load (errors {} / {})", name, e1, e2);
+				logs::warn("DeepFit: the test schlong's mesh meshes\\{} did not load (errors {} / {}; 1 = the game cannot find the file - in MO2, refresh (F5) after files were added while it was open)", name, e1, e2);
 				return false;
 			};
 			NiPointer<NiNode> a, b;
@@ -1757,15 +1953,169 @@ namespace
 			const float deg = g_tiltDeg.load(std::memory_order_relaxed);
 			if (a && deg > 0.01f)
 				tiltNow(a, deg);
+			applyFace(a);   // 0.4.2
+		}
+		static void Char(Character* a, float dt)
+		{
+			g_charAnim(a, dt);
+			applyFace(a);   // 0.4.2: men other than the player
 		}
 		static inline REL::Relocation<decltype(Player)> g_playerAnim;
+		static inline REL::Relocation<decltype(Char)>   g_charAnim;
 		static void Install()
 		{
 			REL::Relocation<std::uintptr_t> vp{ PlayerCharacter::VTABLE[0] };
+			REL::Relocation<std::uintptr_t> vc{ Character::VTABLE[0] };
 			g_playerAnim = vp.write_vfunc(0x7D, Player);
+			g_charAnim = vc.write_vfunc(0x7D, Char);
 			logs::info("DeepFit: hooked the player's animation update (the test page's head tilt)");
 		}
 	};
+
+	// 0.4.3: PPA bends the partner's schlong into his mouth after DeepFit has read it (it reads the animation's pose), so
+	// when the animation leaves it a few units off - under his chin - the mouth never opened although on screen it was
+	// in. When the shaft's line passes close by his lips, it is turned about its base onto them, the way PPA aims it.
+	void aimAtMouth(std::vector<NiPoint3>& pts, const Partner& p, const NiPoint3& C, bool fem)
+	{
+		const auto& cfg = Config::of(fem);
+		if (!cfg.followAim || p.chain.size() < 2 || !p.chain.front() || !p.chain.back())
+			return;
+		const NiPoint3 B = p.chain.front()->world.translate, T = p.chain.back()->world.translate;
+		const NiPoint3 d = T - B, v = C - B;
+		const float    L = len(d), lv = len(v);
+		if (L < 1.0f || lv < 1.0f || lv > L * 1.8f + 4.0f)
+			return;
+		const float t = dot(v, d) / (L * L);
+		if (t < 0.3f)
+			return;
+		const NiPoint3 perpV = v - d * t;
+		if (len(perpV) > cfg.aimRadius)
+			return;
+		const NiPoint3 a = norm(d), b = norm(v);
+		NiPoint3       ax(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x);
+		const float    s = len(ax), c = dot(a, b);
+		const float    ang = std::atan2(s, c);
+		if (s < 1e-5f || ang < 0.003f || ang > cfg.aimMaxDeg * 0.01745329f)
+			return;
+		ax = ax * (1.0f / s);
+		const float cs = std::cos(ang), sn = std::sin(ang);
+		for (auto& q : pts) {   // Rodrigues, about B
+			const NiPoint3 r = q - B;
+			const NiPoint3 k(ax.y * r.z - ax.z * r.y, ax.z * r.x - ax.x * r.z, ax.x * r.y - ax.y * r.x);
+			q = B + r * cs + k * sn + ax * (dot(ax, r) * (1.0f - cs));
+		}
+	}
+
+	// 0.4.4: his schlong's shape, found by DeepFit itself when Anatomica is not installed (Anatomica's own detection - its
+	// compatibility files, menu choices, More Nasty Critters - is fuller, and when it is there it tells DeepFit instead).
+	// In order: a keyword on his schlong (DeepFit_Shape_<kind> or Anatomica_Shape_<kind>), the schlong's name (a worn
+	// one, or TNG's add-on he has), then his race. Kinds: 3 flared, 4 knotted, 5 tentacle, 6 ridged, 7 segmented, 0 plain.
+	bool g_anatomica = false;   // AnatomicaMenu.dll is installed
+
+	bool hasW(const std::string& n, std::initializer_list<const char*> ws)
+	{
+		for (auto* w : ws)
+			if (n.find(w) != std::string::npos)
+				return true;
+		return false;
+	}
+
+	int kindFromWord(const std::string& raw)
+	{
+		std::string n = " " + raw + " ";
+		for (auto& c : n)
+			c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+		if (hasW(n, { "canine", "knot", "dog", "wolf", "fox", "husky" })) return 4;
+		if (hasW(n, { "horse", "equine", "flare", "centaur", "ungulate" })) return 3;
+		if (hasW(n, { "tentacle" })) return 5;
+		if (hasW(n, { "segment", "insect", "chitin", "plated" })) return 7;
+		if (hasW(n, { "argonian", "croc", "drake", "wyvern", "serpent", "reptil", "dragon", "ridge", "lizard", "shark", "khajiit", "feline", "barb", "sabre", "cat " })) return 6;
+		if (hasW(n, { "uncut", "circumcis", "human", "regular", "muscular" })) return 0;
+		return -1;
+	}
+
+	int kindFromKeywords(TESObjectARMO* armo)
+	{
+		if (!armo)
+			return -1;
+		for (std::uint32_t i = 0; i < armo->numKeywords; ++i) {
+			auto* kw = armo->keywords[i];
+			std::string e = kw && kw->formEditorID.c_str() ? kw->formEditorID.c_str() : "";
+			for (auto& c : e)
+				c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+			for (const char* pre : { "deepfit_shape_", "anatomica_shape_" })
+				if (e.rfind(pre, 0) == 0) {
+					const std::string k = e.substr(std::strlen(pre));
+					if (k == "plain" || k == "uncut" || k == "cut") return 0;
+					if (k == "flared" || k == "horse") return 3;
+					if (k == "knotted" || k == "knot") return 4;
+					if (k == "tentacle") return 5;
+					if (k == "ridged" || k == "barbed") return 6;
+					if (k == "segmented") return 7;
+				}
+		}
+		return -1;
+	}
+
+	std::unordered_map<TESObjectARMA*, TESObjectARMO*> g_schlongByArma;   // every schlong armour (slot 52) by its armatures
+	bool                                               g_schlongIndexed = false;
+
+	int findKind(Actor* a, std::string& why)
+	{
+		why.clear();
+		if (!a)
+			return -1;
+		if (!g_schlongIndexed) {
+			g_schlongIndexed = true;
+			if (auto* dh = TESDataHandler::GetSingleton())
+				for (auto* armo : dh->GetFormArray<TESObjectARMO>()) {
+					if (!armo || !armo->HasPartOf(BGSBipedObjectForm::BipedObjectSlot::kModPelvisSecondary) || armo->HasPartOf(BGSBipedObjectForm::BipedObjectSlot::kBody))
+						continue;
+					for (auto* arma : armo->armorAddons)
+						if (arma && !g_schlongByArma.contains(arma))
+							g_schlongByArma[arma] = armo;
+				}
+			logs::info("DeepFit: {} schlong armatures indexed (his shape)", g_schlongByArma.size());
+		}
+		auto byArmour = [&](TESObjectARMO* armo) -> int {
+			if (!armo)
+				return -1;
+			const std::string nm = armo->GetName() ? armo->GetName() : "";
+			if (int k = kindFromKeywords(armo); k >= 0) { why = "its keyword (" + nm + ")"; return k; }
+			if (int k = kindFromWord(nm); k >= 0) { why = "its name (" + nm + ")"; return k; }
+			return -1;
+		};
+		if (auto* worn = a->GetWornArmor(BGSBipedObjectForm::BipedObjectSlot::kModPelvisSecondary); worn && !worn->HasPartOf(BGSBipedObjectForm::BipedObjectSlot::kBody))
+			if (int k = byArmour(worn); k >= 0)
+				return k;
+		if (auto* skin = a->GetSkin())
+			for (auto* arma : skin->armorAddons)
+				if (auto it = g_schlongByArma.find(arma); it != g_schlongByArma.end())
+					if (int k = byArmour(it->second); k >= 0)
+						return k;
+		if (auto* race = a->GetRace()) {
+			const std::string ed = race->GetFormEditorID() ? race->GetFormEditorID() : "";
+			const std::string nm = race->GetName() ? race->GetName() : "";
+			int k = kindFromWord(ed);
+			if (k < 0) k = kindFromWord(nm);
+			if (k < 0 && (ed.find("Werewolf") != std::string::npos || ed.find("werewolf") != std::string::npos)) k = 4;
+			if (k > 0) { why = "his race (" + (nm.empty() ? ed : nm) + ")"; return k; }
+		}
+		why = "nothing says - plain";
+		return 0;
+	}
+
+	const char* kindName(int k)
+	{
+		switch (k) {
+		case 3: return "flared";
+		case 4: return "knotted";
+		case 5: return "tentacle";
+		case 6: return "ridged";
+		case 7: return "segmented";
+		default: return "plain";
+		}
+	}
 
 	// 0.4.0: what DeepFit found, for the menu
 	struct StatusData
@@ -1867,6 +2217,11 @@ void DeepFit::SetMegaOverride(int a_value)
 
 void DeepFit::Install()
 {
+	{   // 0.4.4: is Anatomica installed? (then it tells DeepFit the schlong's shape, and DeepFit's own detection stays off)
+		std::error_code ec;
+		g_anatomica = std::filesystem::exists("Data/SKSE/Plugins/AnatomicaMenu.dll", ec);
+		logs::info("DeepFit: Anatomica {}", g_anatomica ? "found - it tells DeepFit the schlong's shape" : "not found - DeepFit finds the schlong's shape itself");
+	}
 	static bool events = false;
 	if (!events) {
 		if (auto* src = SKSE::GetModCallbackEventSource()) {
@@ -1928,6 +2283,10 @@ void DeepFit::OnFrame(float delta)
 		auto* r = getReceiver(recv, delta);
 		if (!r)
 			continue;
+		{   // 0.4.4: a woman's head (built for DeepFit) uses the women's settings
+			auto* base = recv->GetActorBase();
+			r->female = base && base->GetSex() == SEX::kFemale;
+		}
 		++nRecv;
 		const NiPoint3 headPos = r->head->world.translate;
 
@@ -1950,7 +2309,12 @@ void DeepFit::OnFrame(float delta)
 				mainP = p;
 				mainN = p->world.size();
 			}
-			shaft.insert(shaft.end(), p->world.begin(), p->world.end());
+			if (Config::of(r->female).followAim && r->axesOk) {   // 0.4.3: onto his lips, the way PPA aims it
+				std::vector<NiPoint3> pts = p->world;
+				aimAtMouth(pts, *p, r->mouthC, r->female);
+				shaft.insert(shaft.end(), pts.begin(), pts.end());
+			} else
+				shaft.insert(shaft.end(), p->world.begin(), p->world.end());
 		}
 		// 0.4.0: the partner's race strength
 		std::string raceId;
@@ -1959,6 +2323,17 @@ void DeepFit::OnFrame(float delta)
 				raceId = race->GetFormEditorID() ? race->GetFormEditorID() : "";
 		}
 		r->raceK = main ? cfg.raceStrengthFor(raceId) : 1.0f;
+		// 0.4.4: his shape, found by DeepFit - only without Anatomica (it tells DeepFit itself; the two do not fight)
+		if (main && mainP && cfg.detectShapes && !g_anatomica && !(r->shapeFromAnatomica && g_clock - r->shapeAt < 5.0)) {
+			mainP->kindAge -= delta;
+			if (mainP->kind < 0 || mainP->kindAge <= 0.0f) {
+				mainP->kind = findKind(main, mainP->kindWhy);
+				mainP->kindAge = 5.0f;
+			}
+			r->shape = mainP->kind;
+			r->shapeAt = g_clock;
+			r->shapeFromAnatomica = false;
+		}
 		nShaft += static_cast<int>(shaft.size());
 		r->inScene = !shaft.empty() || (g_preview.on && recv->IsPlayerRef());
 		if (g_preview.on && recv->IsPlayerRef())
@@ -1968,14 +2343,22 @@ void DeepFit::OnFrame(float delta)
 		else
 			solve(*r, shaft, delta);
 		sendMouth(*r, delta);
+		soundsFor(*r, recv);   // 0.4.4
 		updateTeeth(*r, recv, delta);
 		if (recv->IsPlayerRef())
 			updateTestShaft(*r);   // 0.4.0: the test schlong, shown
 		if (r->full && main && mainP) {   // 0.4.0: what the menu shows
 			char buf[512];
-			std::snprintf(buf, sizeof(buf), "%s with %s (%s): %s, %s; tip %.1f deep, race strength x%.2f",
+			std::string shapeTxt = "shape: ";
+			if (r->shapeFromAnatomica && g_clock - r->shapeAt < 5.0)
+				shapeTxt += std::string(r->shape == 3 ? "flared" : r->shape == 4 ? "knotted" : r->shape == 6 ? "ridged" : r->shape == 7 ? "segmented" : "as Anatomica says") + " (from Anatomica)";
+			else if (mainP->kind >= 0)
+				shapeTxt += std::string(kindName(mainP->kind)) + " (" + mainP->kindWhy + ")";
+			else
+				shapeTxt += "as read from his mesh";
+			std::snprintf(buf, sizeof(buf), "%s with %s (%s): %s, %s; %s; tip %.1f deep, race strength x%.2f",
 				recv->GetDisplayFullName(), main->GetDisplayFullName(), raceId.empty() ? "?" : raceId.c_str(), mainP->source.c_str(),
-				mainP->method == 1 ? "shaft built round his bones" : "his mesh read", r->depthPrev, r->raceK);
+				mainP->method == 1 ? "shaft built round his bones" : "his mesh read", shapeTxt.c_str(), r->depthPrev, r->raceK);
 			std::lock_guard lk(g_statusLock);
 			g_status.text = buf;
 			g_status.race = raceId;
@@ -2039,6 +2422,20 @@ DeepFit::TngSizes DeepFit::GetTngSizes()
 }
 
 void DeepFit::AskTng() { g_tngAsk = true; }
+
+int DeepFit::SoundCount(const char* a_kind)
+{
+	std::lock_guard lk(g_soundLock);
+	return static_cast<int>(lookSounds(a_kind).files.size());
+}
+
+void DeepFit::RescanSounds()
+{
+	std::lock_guard lk(g_soundLock);
+	g_sounds.clear();
+}
+
+bool DeepFit::AnatomicaFound() { return g_anatomica; }
 
 std::string DeepFit::StatusText(std::string* a_race, float* a_ago)
 {

@@ -1,4 +1,5 @@
 #include "Config.h"
+#include <unordered_set>
 #include <mutex>
 
 Config& Config::get()
@@ -7,6 +8,32 @@ Config& Config::get()
 	return c;
 }
 
+// 0.4.4: women's heads have their own set (DeepFit_Female.ini: only the per-head settings; everything else is the
+// main file's)
+Config& Config::female()
+{
+	static Config c = [] { Config f; f.isFemale = true; return f; }();
+	return c;
+}
+
+// the per-head settings: how the mouth, lips, face, throat and sounds look and move - kept apart for women's heads and
+// written to preset files; the rest (what is read, keys, other mods) is shared
+static const std::unordered_set<std::string>& lookKeys()
+{
+	static const std::unordered_set<std::string> k{
+		"LipMargin", "LipDepthSlab", "LipLaneWidth", "UpperLipMax", "LowerLipMax", "CornerMax", "Stretch", "MinOpen", "MinCorner",
+		"MouthExtra", "JawUnits", "LipUnits", "WidenUnits", "MorphMax", "LipCloseMax", "UpperLipDown", "LowerLipUp", "LipsAlongShaft",
+		"FollowAim", "AimRadius", "AimMaxDeg", "ThroatFrom", "ThroatFull", "ThroatShape", "ThroatBand", "ThroatFill", "ThroatRest",
+		"ThroatShapeGain", "ThroatShapeMax", "ThroatWideUnits", "ThroatWideExtra", "ThroatDetail", "ThroatMotion", "ThroatMotionLength",
+		"LipRound", "MouthWideGain", "MouthWideMax", "CornerOpen", "ThroatAxisFit", "CheekGain", "CheekMax", "CheekInner",
+		"GulpSize", "GulpTime", "GagJaw", "GagSqueeze", "GagTime", "ShapeRidge", "ShapeKnob", "TeethOpen", "TeethMove", "TeethDown",
+		"TeethBack", "FaceReact", "FaceEyes", "FaceBrows", "FaceGag", "LipDrag", "LipDragSpeed", "RecoverHold", "RecoverOpen",
+		"RecoverGulp", "AutoGagGulp", "AutoDeep", "AutoGagSpeed", "AutoGagCooldown", "AutoGulpHold",
+		"SoundGulp", "SoundGag", "SoundGasp", "SoundOwnOnly", "ExtraPush", "ExtraDepth", "ExtraChance", "ExtraHold", "ShapeFlare", "ShapeKnotOpen" };
+	return k;
+}
+bool Config::isLookKey(const std::string& k) { return lookKeys().contains(k); }
+
 static std::string trim(const std::string& s)
 {
 	auto a = s.find_first_not_of(" \t\r\n");
@@ -14,13 +41,15 @@ static std::string trim(const std::string& s)
 	return a == std::string::npos ? std::string() : s.substr(a, b - a + 1);
 }
 
-void Config::load()
+static const char* kMainIni = "Data/SKSE/Plugins/DeepFit.ini";
+static const char* kFemaleIni = "Data/SKSE/Plugins/DeepFit_Female.ini";
+
+// 0.4.4: one file (the main ini, the women's ini or a preset) read into this set; lookOnly = only the per-head settings
+bool Config::loadFile(const std::string& path, bool lookOnly)
 {
-	std::ifstream f("Data/SKSE/Plugins/DeepFit.ini");
-	if (!f) {
-		logs::warn("DeepFit.ini not found, using defaults");
-		return;
-	}
+	std::ifstream f(path);
+	if (!f)
+		return false;
 	std::string line;
 	while (std::getline(f, line)) {
 		auto hash = line.find_first_of(";#");
@@ -33,6 +62,16 @@ void Config::load()
 		std::string v = trim(line.substr(eq + 1));
 		if (k.empty() || v.empty())
 			continue;
+		if (lookOnly && !isLookKey(k))
+			continue;
+		applyKey(k, v);
+	}
+	return true;
+}
+
+void Config::applyKey(const std::string& k, const std::string& v)
+{
+	{
 		auto fl = [&](float& dst) { try { dst = std::stof(v); } catch (...) {} };
 		auto bl = [&](bool& dst) { dst = (v == "1" || v == "true" || v == "True" || v == "yes"); };
 
@@ -117,6 +156,9 @@ void Config::load()
 		else if (k == "UpperLipDown") fl(upperLipDown);
 		else if (k == "LowerLipUp") fl(lowerLipUp);
 		else if (k == "LipsAlongShaft") bl(lipsAlongShaft);
+		else if (k == "FollowAim") bl(followAim);
+		else if (k == "AimRadius") fl(aimRadius);
+		else if (k == "AimMaxDeg") fl(aimMaxDeg);
 		else if (k == "NoseFollow") fl(noseFollow);
 		else if (k == "NoseMax") fl(noseMax);
 		else if (k == "ThroatEnabled") bl(throatEnabled);
@@ -126,15 +168,52 @@ void Config::load()
 		else if (k == "ThroatMax") fl(throatMax);
 		else if (k == "ThroatSlabZ") fl(throatSlabZ);
 		else if (k == "ThroatSlabX") fl(throatSlabX);
+		else if (k == "SoundGulp") fl(soundGulp);
+		else if (k == "ExtraPush") bl(extraPush);
+		else if (k == "DetectShapes") bl(detectShapes);
+		else if (k == "ShapeFlare") fl(shapeFlare);
+		else if (k == "ShapeKnotOpen") fl(shapeKnotOpen);
+		else if (k == "ExtraDepth") fl(extraDepth);
+		else if (k == "ExtraChance") fl(extraChance);
+		else if (k == "ExtraHold") fl(extraHold);
+		else if (k == "SoundGag") fl(soundGag);
+		else if (k == "SoundGasp") fl(soundGasp);
+		else if (k == "SoundOwnOnly") bl(soundOwnOnly);
 	}
+}
+
+void Config::load()
+{
+	if (isFemale) {
+		female().syncFromMain();
+		return;
+	}
+	if (!loadFile(kMainIni, false))
+		logs::warn("DeepFit.ini not found, using defaults");
 	logs::info("DeepFit.ini loaded (enabled={}, throat={}, debug={})", enabled, throatEnabled, debugLog);
+	// women's heads: the main set, then their own per-head settings over it
+	auto& f = female();
+	f = *this;
+	f.isFemale = true;
+	if (f.loadFile(kFemaleIni, true))
+		logs::info("DeepFit_Female.ini loaded (women's heads)");
+}
+
+// the shared settings changed in the main set: the women's set takes them, keeping its own per-head ones
+void Config::syncFromMain()
+{
+	auto& f = female();
+	const auto mine = f.keyValues(true);
+	f = get();
+	f.isFemale = true;
+	for (auto& [k, v] : mine)
+		f.applyKey(k, v);
 }
 
 // 0.3.0: write the settings back, changing only the values (comments and order stay as they are); keys the file does
 // not have yet are added at the end
-void Config::save()
+std::vector<std::pair<std::string, std::string>> Config::keyValues(bool lookOnly) const
 {
-	const char* path = "Data/SKSE/Plugins/DeepFit.ini";
 	std::vector<std::pair<std::string, std::string>> kv;
 	auto f2 = [](float v) { char b[32]; std::snprintf(b, sizeof(b), "%.2f", v); return std::string(b); };
 	auto b2 = [](bool v) { return std::string(v ? "1" : "0"); };
@@ -164,7 +243,36 @@ void Config::save()
 		{ "ThroatMotion", f2(throatMotion) }, { "ThroatMotionLength", f2(throatMotionLen) },
 		{ "TeethOpen", b2(teethOpen) }, { "LipCloseMax", f2(lipCloseMax) }, { "UpperLipDown", f2(upperLipDown) },
 		{ "LowerLipUp", f2(lowerLipUp) }, { "LipsAlongShaft", b2(lipsAlongShaft) },
+		{ "FollowAim", b2(followAim) }, { "AimRadius", f2(aimRadius) }, { "AimMaxDeg", f2(aimMaxDeg) },
+		{ "DetectShapes", b2(detectShapes) }, { "ShapeFlare", f2(shapeFlare) }, { "ShapeKnotOpen", f2(shapeKnotOpen) },
+		{ "ExtraPush", b2(extraPush) }, { "ExtraDepth", f2(extraDepth) }, { "ExtraChance", f2(extraChance) }, { "ExtraHold", f2(extraHold) },
+		{ "SoundGulp", f2(soundGulp) }, { "SoundGag", f2(soundGag) }, { "SoundGasp", f2(soundGasp) },
+		{ "SoundOwnOnly", b2(soundOwnOnly) },
 	};
+	if (lookOnly) {
+		std::vector<std::pair<std::string, std::string>> out;
+		for (auto& e : kv)
+			if (isLookKey(e.first))
+				out.push_back(e);
+		return out;
+	}
+	return kv;
+}
+
+void Config::save()
+{
+	if (isFemale)
+		saveTo(kFemaleIni, true);
+	else {
+		saveTo(kMainIni, false);
+		syncFromMain();
+	}
+}
+
+// writes this set into a file: the values of the keys it has are changed (comments and order kept), the rest added
+bool Config::saveTo(const std::string& path, bool lookOnly) const
+{
+	const auto kv = keyValues(lookOnly);
 	std::vector<std::string> lines;
 	{
 		std::ifstream in(path);
@@ -197,8 +305,11 @@ void Config::save()
 		if (!done[i])
 			lines.push_back(kv[i].first + " = " + kv[i].second);
 	std::ofstream out(path, std::ios::binary | std::ios::trunc);
+	if (!out)
+		return false;
 	for (auto& line : lines)
 		out << line << "\r\n";
+	return true;
 }
 
 // 0.4.0: "WerewolfBeastRace:0.80, OtherRace:1.20" (race editor IDs, any case)
@@ -275,6 +386,14 @@ void Config::resetDefaults()
 	const int  key = megaKey, mods = megaKeyMods;
 	const bool dbg = debugLog;
 	const std::string races = raceStrength;
+	const bool        fem = isFemale;
+	if (fem) {   // 0.4.4: the women's set: the per-head settings back to as installed, the shared ones kept
+		Config d{};
+		for (auto& [k, v] : d.keyValues(true))
+			applyKey(k, v);
+		save();
+		return;
+	}
 	*this = Config{};
 	raceStrength = races;
 	megaKey = key;
