@@ -1,4 +1,5 @@
 #include "Config.h"
+#include "Heads.h"
 #include <unordered_set>
 #include <mutex>
 
@@ -29,7 +30,7 @@ static const std::unordered_set<std::string>& lookKeys()
 		"GulpSize", "GulpTime", "GagJaw", "GagSqueeze", "GagTime", "ShapeRidge", "ShapeKnob", "TeethOpen", "TeethMove", "TeethDown",
 		"TeethBack", "FaceReact", "FaceEyes", "FaceBrows", "FaceGag", "LipDrag", "LipDragSpeed", "RecoverHold", "RecoverOpen",
 		"RecoverGulp", "AutoGagGulp", "AutoDeep", "AutoGagSpeed", "AutoGagCooldown", "AutoGulpHold",
-		"SoundGulp", "SoundGag", "SoundGasp", "SoundOwnOnly", "ExtraPush", "ExtraDepth", "ExtraChance", "ExtraHold", "ShapeFlare", "ShapeKnotOpen" };
+		"SoundGulp", "SoundGag", "SoundGasp", "SoundOwnOnly", "ExtraPush", "ExtraDepth", "ExtraChance", "ExtraHold", "ExtraSwell", "ShapeFlare", "ShapeKnotOpen" };
 	return k;
 }
 bool Config::isLookKey(const std::string& k) { return lookKeys().contains(k); }
@@ -177,6 +178,7 @@ void Config::applyKey(const std::string& k, const std::string& v)
 		else if (k == "ExtraDepth") fl(extraDepth);
 		else if (k == "ExtraChance") fl(extraChance);
 		else if (k == "ExtraHold") fl(extraHold);
+		else if (k == "ExtraSwell") fl(extraSwell);
 		else if (k == "SoundGag") fl(soundGag);
 		else if (k == "SoundGasp") fl(soundGasp);
 		else if (k == "SoundOwnOnly") bl(soundOwnOnly);
@@ -198,6 +200,7 @@ void Config::load()
 	f.isFemale = true;
 	if (f.loadFile(kFemaleIni, true))
 		logs::info("DeepFit_Female.ini loaded (women's heads)");
+	Heads::Load();   // 0.4.6: the head profiles (Heads\\*.ini) over the main / women's sets
 }
 
 // the shared settings changed in the main set: the women's set takes them, keeping its own per-head ones
@@ -209,6 +212,7 @@ void Config::syncFromMain()
 	f.isFemale = true;
 	for (auto& [k, v] : mine)
 		f.applyKey(k, v);
+	Heads::SyncAll();   // 0.4.6: and every head profile
 }
 
 // 0.3.0: write the settings back, changing only the values (comments and order stay as they are); keys the file does
@@ -246,7 +250,7 @@ std::vector<std::pair<std::string, std::string>> Config::keyValues(bool lookOnly
 		{ "LowerLipUp", f2(lowerLipUp) }, { "LowerLipRound", f2(lowerLipRound) }, { "LipsAlongShaft", b2(lipsAlongShaft) },
 		{ "FollowAim", b2(followAim) }, { "AimRadius", f2(aimRadius) }, { "AimMaxDeg", f2(aimMaxDeg) },
 		{ "DetectShapes", b2(detectShapes) }, { "ShapeFlare", f2(shapeFlare) }, { "ShapeKnotOpen", f2(shapeKnotOpen) },
-		{ "ExtraPush", b2(extraPush) }, { "ExtraDepth", f2(extraDepth) }, { "ExtraChance", f2(extraChance) }, { "ExtraHold", f2(extraHold) },
+		{ "ExtraPush", b2(extraPush) }, { "ExtraDepth", f2(extraDepth) }, { "ExtraChance", f2(extraChance) }, { "ExtraHold", f2(extraHold) }, { "ExtraSwell", f2(extraSwell) },
 		{ "SoundGulp", f2(soundGulp) }, { "SoundGag", f2(soundGag) }, { "SoundGasp", f2(soundGasp) },
 		{ "SoundOwnOnly", b2(soundOwnOnly) },
 	};
@@ -262,7 +266,9 @@ std::vector<std::pair<std::string, std::string>> Config::keyValues(bool lookOnly
 
 void Config::save()
 {
-	if (isFemale)
+	if (!ownFile.empty())   // 0.4.6: a head profile: only its per-head settings, into its own file
+		saveTo(ownFile, true);
+	else if (isFemale)
 		saveTo(kFemaleIni, true);
 	else {
 		saveTo(kMainIni, false);
@@ -388,7 +394,7 @@ void Config::resetDefaults()
 	const bool dbg = debugLog;
 	const std::string races = raceStrength;
 	const bool        fem = isFemale;
-	if (fem) {   // 0.4.4: the women's set: the per-head settings back to as installed, the shared ones kept
+	if (fem || !ownFile.empty()) {   // 0.4.4: the women's set (0.4.6: or a head profile's): the per-head settings back to as installed, the shared ones kept
 		Config d{};
 		for (auto& [k, v] : d.keyValues(true))
 			applyKey(k, v);

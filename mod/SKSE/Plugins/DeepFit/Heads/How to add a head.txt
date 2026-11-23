@@ -1,0 +1,28 @@
+DeepFit head profiles
+=====================
+
+Every .ini file in this folder is one head DeepFit can fit. To add a head (another race, a custom race, a
+head you built), copy one of the files, rename it and change it - nothing needs compiling. In game, press
+"Reload head files" on DeepFit's Info page (or restart).
+
+[Head]
+  Name        what the menu calls it (each page gets a drop-down with this name at the bottom)
+  Races       race editor IDs, comma separated (* = every race)
+  HeadMeshes  head mesh file names, comma separated (maleheadargonian.nif) - checked first, so custom races
+              that use that head get it too
+  Sex         male, female or any
+
+[Bones]
+  Bone Name = Kind, x, y, z
+  Kind is Lip, Corner, Nose, Throat or Cheek; x y z is the way it pushes (x his right, y forward, z up).
+  DeepFit already knows these (a line here changes how one pushes):
+    Upper Lip Center / Left / Right, Bottom Lip Center / Left / Right, Corner Lip Left / Right,
+    Cheeck Side L / R (SMP Head's spelling), Nose Base, Throat Center 1-3,
+    Muzzle Upper / Lower / Jaw Left / Right (beast heads)
+  Any other name adds a bone (up to 48 in all). The head mesh needs the bones (weighted) for them to do anything.
+  'Left' bones sit at negative x (his left).
+
+[Settings]
+  That head's own settings - the drop-down writes them here. Leave it empty to start from the main settings.
+
+Heads without a profile use DeepFit's own bones and the main (or women's) settings.

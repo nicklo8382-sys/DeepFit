@@ -1,5 +1,6 @@
 #include "Menu.h"
 #include "Config.h"
+#include "Heads.h"
 #include "SKSEMenuFramework.h"
 #include "DeepFit.h"
 #include <filesystem>
@@ -275,6 +276,23 @@ namespace DeepFit::Menu
 					f.save();
 				ImGuiMCP::PopID();
 			}
+			// 0.4.6: every head profile (Heads\*.ini) - its own settings, saved into its file
+			auto& heads = Heads::All();
+			for (std::size_t i = 0; i < heads.size(); ++i) {
+				auto&       h = heads[i];
+				std::string label = h.name + (h.sex == 1 ? std::string(T(" (women)")) : h.sex == -1 ? std::string(T(" (men and women)")) : std::string()) + "###head" + std::to_string(i);
+				if (!ImGuiMCP::CollapsingHeader(label.c_str()))
+					continue;
+				std::string who;
+				for (auto& r : h.races) who += (who.empty() ? "" : ", ") + r;
+				for (auto& m : h.meshes) who += (who.empty() ? "" : ", ") + m;
+				ImGuiMCP::TextDisabled("%s %s", T("Used for:"), who.empty() ? T("(nothing set - add Races or HeadMeshes to its file)") : who.c_str());
+				ImGuiMCP::TextDisabled("%s %s", T("Saved to"), std::filesystem::path(h.file).filename().string().c_str());
+				ImGuiMCP::PushID(static_cast<int>(1000 + i));
+				if (body(h.cfg, h.sex == 1))
+					h.cfg.save();
+				ImGuiMCP::PopID();
+			}
 		}
 
 		bool LipsBody(Config& c, bool)
@@ -416,7 +434,14 @@ namespace DeepFit::Menu
 			ch |= Check("Throat bulge, by the schlong's shape", &c.throatShape);
 			Help("DeepFit's own throat morphs: ten thin bands down the front of his throat, from under his chin to just above the neck seam. Where the shaft is, the throat fills out to a straight line from chin to neck, then swells past it by how thick that part of the schlong is, so a flared head, a medial ring or a knot shows as it goes down.");
 			if (c.throatShape) {
+				if (ImGuiMCP::Button(T("Throat back to recommended"))) {
+					c.throatFrom = 6.1f; c.throatBand = 1.86f; c.throatFill = 1.0f; c.throatRest = 1.0f; c.throatShapeGain = 1.6f;
+					c.throatDetail = 1.6f; c.throatShapeMax = 3.0f; c.throatWideExtra = 0.3f; c.throatWideUnits = 3.0f; c.throatMotion = 0.4f;
+					ch = true;
+				}
+				Help("Where and how much: the throat starts 6.1 units past the lips and shows 18.6 units of the shaft, so a flared head, a ring or a knot each lands on its own part of his throat. Very short bands, a low \"Bulge, at most\" or \"Shape stands out\" at 1 make every schlong look the same.");
 				Section("Where");
+				ImGuiMCP::TextDisabled(T("His throat shows the shaft from %.1f to %.1f units past his lips."), c.throatFrom, c.throatFrom + 10.0f * c.throatBand);
 				ch |= Slider("Throat starts at", &c.throatFrom, 0.0f, 12.0f, "%.1f units deep");
 				Help("How far past his lips the schlong has to be to reach the top of his throat (under his chin).");
 				ch |= Slider("Shaft per band", &c.throatBand, 0.3f, 2.0f, "%.2f units");
@@ -430,7 +455,8 @@ namespace DeepFit::Menu
 				ch |= Slider("Bulge per thickness", &c.throatShapeGain, 0.2f, 4.0f, "x%.1f");
 				ch |= Slider("Shape stands out", &c.throatDetail, 1.0f, 3.0f, "x%.1f");
 				Help("A flared head, medial ring or knot this many times more pronounced than the shaft itself (1 = exactly as the schlong is shaped).");
-				ch |= Slider("Bulge, at most", &c.throatShapeMax, 0.5f, 5.0f, "%.1f units");
+				ch |= Slider("Bulge, at most", &c.throatShapeMax, 0.5f, 3.0f, "%.1f units");
+				Help("3 units is as far as the head's throat morphs go (MFEE's limit of 100) - past that every bulge would look the same.");
 				ch |= Slider("Wider", &c.throatWideExtra, 0.0f, 1.0f, "%.2f");
 				Help("Every bulge spreads further across his neck as soft shoulders round the shaft's own ridge (0 = as wide as the shaft, 1 = most of the front of his neck).");
 				ch |= Slider("Spreads fully sideways at", &c.throatWideUnits, 0.3f, 3.0f, "%.1f units wider");
@@ -453,6 +479,8 @@ namespace DeepFit::Menu
 				ch |= Slider("Chance each stroke", &c.extraChance, 0.0f, 1.0f, "%.2f");
 				Help("0.25 = about one stroke in four; 1 = every stroke.");
 				ch |= Slider("Stays there for", &c.extraHold, 0.2f, 3.0f, "%.1f s");
+				ch |= Slider("Throat swells meanwhile", &c.extraSwell, 0.0f, 2.0f, "%.2f units");
+				Help("While pushed deeper, the throat also swells this much more. Going deeper only shows while the shaft does not already reach the bottom of his throat (\"His throat shows the shaft from ... to ...\" on this page); the swell shows at any depth.");
 			}
 			Section("Swallow and gag");
 			ch |= Slider("Swallow", &c.gulpSize, 0.0f, 3.0f, "%.1f units");
@@ -618,6 +646,25 @@ namespace DeepFit::Menu
 						ch = true;
 					}
 				}
+			}
+
+			Section("Heads");
+			{
+				const std::string mine = DeepFit::PlayerHeadText();
+				if (!mine.empty())
+					ImGuiMCP::TextWrapped("%s", mine.c_str());
+				auto& heads = Heads::All();
+				if (heads.empty())
+					ImGuiMCP::TextDisabled("%s", T("No head profiles - every head uses DeepFit's own bones and the settings above."));
+				for (auto& h : heads) {
+					std::string who;
+					for (auto& r : h.races) who += (who.empty() ? "" : ", ") + r;
+					for (auto& m : h.meshes) who += (who.empty() ? "" : ", ") + m;
+					ImGuiMCP::BulletText("%s - %s (%zu %s)", h.name.c_str(), who.empty() ? "-" : who.c_str(), h.bones.size(), T("bones set"));
+				}
+				if (ImGuiMCP::Button(T("Reload head files")))
+					DeepFit::RequestHeadReload();
+				Help("Each head DeepFit fits can have a profile: a file in Data\\SKSE\\Plugins\\DeepFit\\Heads. It names the races (or head meshes) it is for, the head's bones and which way each pushes, and keeps that head's own settings (the drop-downs at the bottom of each page). To add a head, copy one of the files, change it and press Reload - nothing needs compiling. Heads without a profile use the settings above.");
 			}
 
 			Section("Presets");

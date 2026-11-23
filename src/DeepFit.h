@@ -32,6 +32,8 @@ namespace DeepFit
 	void     RescanSounds();
 	void     AskTng();          // asks TNG again (on the game's thread, next frame)
 	Preview& GetPreview();
+	void     RequestHeadReload();     // 0.4.6: read the head profiles again (on the game's thread, next frame)
+	std::string PlayerHeadText();    // 0.4.6: which head profile the player's head uses, and its bones found
 	std::string StatusText(std::string* a_race = nullptr, float* a_ago = nullptr);   // 0.4.0: what DeepFit last found (the menu)
 	void Install();            // frame driver (at input loaded)
 	void OnFrame(float delta);

@@ -117,6 +117,7 @@ struct Config
 	float extraDepth = 4.0f;       // units deeper
 	float extraChance = 0.25f;     // the chance each stroke (1 = every stroke)
 	float extraHold = 0.8f;        // seconds it stays there
+	float extraSwell = 0.6f;       // 0.4.5: ... and the throat swells this much more meanwhile (units)
 
 	// 0.4.4: sounds (Data\Sound\Fx\DeepFit\<gulp / gag / gasp>; a swallow falls back to Anatomica's gulps)
 	float soundGulp = 0.8f;        // volume of a swallow (0 = off)
@@ -125,6 +126,7 @@ struct Config
 	bool  soundOwnOnly = true;     // only DeepFit's own swallows and gags (Anatomica plays its own)
 
 	bool           isFemale = false;   // 0.4.4: the women's set
+	std::string    ownFile;            // 0.4.6: a head profile's set (its per-head settings are saved to this file)
 	static Config& get();               // the main (men's) set, and every shared setting
 	static Config& female();            // 0.4.4: women's heads built for DeepFit
 	static Config& of(bool a_female) { return a_female ? female() : get(); }
