@@ -88,6 +88,7 @@ struct Config
 	void  setRaceStrength(const std::string& a_race, float a_k);
 	void  clearRaces();
 	float lipCloseMax = 2.0f;      // lips may close in this far (round a slim shaft once the jaw is open)
+	float lowerLipRound = 0.5f;    // 0.4.4: the lower lip's sides pushed out and down as the jaw opens (units at a full jaw)
 	float lowerLipUp = 0.0f;       // 0.4.1: the lower lip pushed up this far while the mouth is full
 	bool  lipsAlongShaft = true;   // 0.4.1: the mouth opens to the shaft measured across it (not straight up and down his face)
 	bool  followAim = true;        // 0.4.3: a shaft whose line passes his lips is turned onto them (as PPA aims it)

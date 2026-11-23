@@ -77,7 +77,8 @@ namespace
 	constexpr int         kMouthWide = kWideT0 + kBands;   // 0.3.8: DF_MouthWide - the corners pulled out to the sides (a wide-open mouth, not a pucker)
 	constexpr int         kRidge0 = kMouthWide + 1;        // 0.4.0: DF_ThroatRidge1-10 - a ridged schlong's ridge down the middle
 	constexpr int         kKnob0 = kRidge0 + kBands;       // 0.4.0: DF_ThroatKnob1-10 - a segmented one's knobs, one each side
-	constexpr int         kMorphs = kKnob0 + kBands;
+	constexpr int         kLowerRound = kKnob0 + kBands;   // 0.4.4: DF_LowerLipRound - the lower lip's sides out and down (a round opening)
+	constexpr int         kMorphs = kLowerRound + 1;
 	constexpr const char* kMorphNames[kMorphs] = { "PPA_JawWide", "PPA_LipStretch", "PPA_LipWiden", "PPA_TH1", "PPA_TH2", "PPA_TH3",
 		"DF_ThroatFill1", "DF_ThroatFill2", "DF_ThroatFill3", "DF_ThroatFill4", "DF_ThroatFill5",
 		"DF_ThroatFill6", "DF_ThroatFill7", "DF_ThroatFill8", "DF_ThroatFill9", "DF_ThroatFill10",
@@ -91,7 +92,8 @@ namespace
 		"DF_ThroatRidge1", "DF_ThroatRidge2", "DF_ThroatRidge3", "DF_ThroatRidge4", "DF_ThroatRidge5",
 		"DF_ThroatRidge6", "DF_ThroatRidge7", "DF_ThroatRidge8", "DF_ThroatRidge9", "DF_ThroatRidge10",
 		"DF_ThroatKnob1", "DF_ThroatKnob2", "DF_ThroatKnob3", "DF_ThroatKnob4", "DF_ThroatKnob5",
-		"DF_ThroatKnob6", "DF_ThroatKnob7", "DF_ThroatKnob8", "DF_ThroatKnob9", "DF_ThroatKnob10" };
+		"DF_ThroatKnob6", "DF_ThroatKnob7", "DF_ThroatKnob8", "DF_ThroatKnob9", "DF_ThroatKnob10",
+		"DF_LowerLipRound" };
 
 	// 0.4.4: DF_Throat / DF_ThroatWideT / DF_ThroatRidge / DF_ThroatKnob are 3 units at 100 in the head (were 1): every
 	// value DeepFit works out for them (in units x 100) is sent as a third, so a big bulge no longer hits MFEE's limit of
@@ -541,36 +543,95 @@ namespace
 			}
 			const bool fullPrec = posBytes >= 12;
 
-			ShaftShape shape;
-			shape.geom = NiPointer<BSGeometry>(geom);
-			for (std::uint32_t j = 0; j < sp->vertexCount; ++j) {
-				const std::uint8_t*  v = data + static_cast<std::size_t>(j) * vSize;
-				const std::uint16_t* hw = reinterpret_cast<const std::uint16_t*>(v + skinOff);
-				const std::uint8_t*  bi = reinterpret_cast<const std::uint8_t*>(hw + 4);
-				float                w[4];
-				float                genW = 0.0f, tot = 0.0f;
-				for (int k = 0; k < 4; ++k) {
-					w[k] = half2float(hw[k]);
-					if (!(w[k] > 0.0f) || bi[k] >= nb || !si->bones[bi[k]])
-						w[k] = 0.0f;
-					tot += w[k];
-					if (w[k] > 0.0f && isGen[bi[k]])
-						genW += w[k];
+			// 0.4.4: which partition each vertex is drawn in. A mesh in several partitions (many non-human schlongs) may number
+			// its vertices' bones within their partition, not across the whole mesh: read that way the points landed on the
+			// wrong bones, 20-25 units from where the schlong was drawn, and the mouth never opened. Both readings are tried
+			// and the one whose points sit on their own bones is kept.
+			std::vector<std::int16_t> partOf;
+			if (sp->numPartitions > 1) {
+				partOf.assign(sp->vertexCount, -1);
+				for (std::uint32_t pi = 0; pi < sp->numPartitions; ++pi) {
+					auto&                pp = sp->partitions[pi];
+					const std::uint16_t* idx = (pp.buffData && pp.buffData->rawIndexData) ? pp.buffData->rawIndexData : pp.triList;
+					if (!idx)
+						continue;
+					for (std::uint32_t t = 0; t < static_cast<std::uint32_t>(pp.triangles) * 3u; ++t)
+						if (idx[t] < sp->vertexCount && partOf[idx[t]] < 0)
+							partOf[idx[t]] = static_cast<std::int16_t>(pi);
 				}
-				if (tot <= 0.0f || genW / tot < 0.6f)
-					continue;
-				ShaftVert sv;
-				if (fullPrec)
-					sv.skinPos = *reinterpret_cast<const NiPoint3*>(v);
-				else {   // 0.1.4: half-precision positions (most SE meshes) - 0.1.3 read them as floats and got scattered points
-					const std::uint16_t* h3 = reinterpret_cast<const std::uint16_t*>(v);
-					sv.skinPos = NiPoint3(half2float(h3[0]), half2float(h3[1]), half2float(h3[2]));
+			}
+			auto readVerts = [&](bool local) {
+				ShaftShape out;
+				out.geom = NiPointer<BSGeometry>(geom);
+				for (std::uint32_t j = 0; j < sp->vertexCount; ++j) {
+					const std::uint8_t*  v = data + static_cast<std::size_t>(j) * vSize;
+					const std::uint16_t* hw = reinterpret_cast<const std::uint16_t*>(v + skinOff);
+					const std::uint8_t*  bi0 = reinterpret_cast<const std::uint8_t*>(hw + 4);
+					std::uint32_t        bi[4];
+					for (int k = 0; k < 4; ++k) {
+						bi[k] = bi0[k];
+						if (local && !partOf.empty() && partOf[j] >= 0) {
+							auto& pp = sp->partitions[partOf[j]];
+							bi[k] = (pp.bones && bi0[k] < pp.numBones) ? pp.bones[bi0[k]] : 0xFFFF;
+						}
+					}
+					float w[4];
+					float genW = 0.0f, tot = 0.0f;
+					for (int k = 0; k < 4; ++k) {
+						w[k] = half2float(hw[k]);
+						if (!(w[k] > 0.0f) || bi[k] >= nb || !si->bones[bi[k]])
+							w[k] = 0.0f;
+						tot += w[k];
+						if (w[k] > 0.0f && isGen[bi[k]])
+							genW += w[k];
+					}
+					if (tot <= 0.0f || genW / tot < 0.6f)
+						continue;
+					ShaftVert sv;
+					if (fullPrec)
+						sv.skinPos = *reinterpret_cast<const NiPoint3*>(v);
+					else {   // 0.1.4: half-precision positions (most SE meshes) - 0.1.3 read them as floats and got scattered points
+						const std::uint16_t* h3 = reinterpret_cast<const std::uint16_t*>(v);
+						sv.skinPos = NiPoint3(half2float(h3[0]), half2float(h3[1]), half2float(h3[2]));
+					}
+					for (int k = 0; k < 4; ++k) {
+						sv.bone[k] = static_cast<std::uint8_t>(std::min<std::uint32_t>(bi[k], 255u));
+						sv.weight[k] = (bi[k] < 256u) ? w[k] / tot : 0.0f;
+					}
+					out.verts.push_back(sv);
 				}
-				for (int k = 0; k < 4; ++k) {
-					sv.bone[k] = bi[k];
-					sv.weight[k] = w[k] / tot;
+				return out;
+			};
+			// how far the points land from the bone that moves each most (small = read right)
+			auto offBones = [&](const ShaftShape& sh) {
+				std::vector<float> dd;
+				const std::size_t  step = std::max<std::size_t>(1, sh.verts.size() / 80);
+				for (std::size_t i = 0; i < sh.verts.size(); i += step) {
+					const auto& sv = sh.verts[i];
+					int         kb = 0;
+					for (int k = 1; k < 4; ++k)
+						if (sv.weight[k] > sv.weight[kb]) kb = k;
+					const std::uint32_t b = sv.bone[kb];
+					if (b >= nb || !si->bones[b])
+						continue;
+					const NiPoint3 q = (si->bones[b]->world * sd->boneData[b].skinToBone) * sv.skinPos;
+					dd.push_back(len(q - si->bones[b]->world.translate));
 				}
-				shape.verts.push_back(sv);
+				if (dd.empty())
+					return 1e9f;
+				std::nth_element(dd.begin(), dd.begin() + dd.size() / 2, dd.end());
+				return dd[dd.size() / 2];
+			};
+			ShaftShape shape = readVerts(false);
+			if (!partOf.empty()) {
+				ShaftShape alt = readVerts(true);
+				const float a = offBones(shape), b = offBones(alt);
+				if (!alt.verts.empty() && (shape.verts.empty() || b < a * 0.7f)) {
+					if (Config::get().debugLog)
+						logs::info("DeepFit: {} numbers its bones per partition ({} partitions; {:.1f} from its bones read that way, {:.1f} the other)",
+							geom->name.c_str() ? geom->name.c_str() : "?", sp->numPartitions, b, a);
+					shape = std::move(alt);
+				}
 			}
 			if (!shape.verts.empty()) {
 				if (Config::get().debugLog)   // 0.4.2: which parts of him are read
@@ -953,6 +1014,8 @@ namespace
 				{
 					const float out = std::max(0.0f, 0.5f * (width + cfg.mouthExtra) - 0.5f * restWidth) + cfg.cornerOpen * open;
 					want[kMouthWide] = DeepFit::MegaMouthNow() ? 100.0f * cfg.mouthWideMax : 100.0f * std::clamp(out * cfg.mouthWideGain, 0.0f, cfg.mouthWideMax);
+					// 0.4.4: the lower lip's sides rounded out as the jaw opens (a U, not a diamond pinched at its sides)
+					want[kLowerRound] = 100.0f * cfg.lowerLipRound * std::clamp(want[0] / 100.0f, 0.0f, 1.0f);
 				}
 				want[2] = DeepFit::MegaMouthNow() ? cfg.morphMax : std::max(0.0f, (width + cfg.mouthExtra - restWidth) * 0.5f) / std::max(cfg.widenUnits, 0.1f) * 100.0f;
 			}
@@ -1449,6 +1512,21 @@ namespace
 		return k;
 	}
 
+	// (CommonLibSSE-NG 3.7 has neither of these two: the game's own functions, called directly)
+	void idFromPath(BSResource::ID& a_id, const char* a_path)
+	{
+		using func_t = void (*)(BSResource::ID*, const char*);
+		static REL::Relocation<func_t> func{ RELOCATION_ID(68635, 69979) };
+		func(&a_id, a_path);
+	}
+
+	void soundHandleByFile(BSAudioManager* a_am, BSSoundHandle& a_handle, const BSResource::ID& a_file, std::uint32_t a_flags, std::uint32_t a_priority)
+	{
+		using func_t = void (*)(BSAudioManager*, BSSoundHandle&, const BSResource::ID&, std::uint32_t, std::uint32_t);
+		static REL::Relocation<func_t> func{ RELOCATION_ID(66402, 67664) };
+		func(a_am, a_handle, a_file, a_flags, a_priority);
+	}
+
 	void playSound(const char* kind, Actor* a, float volume)
 	{
 		auto* am = BSAudioManager::GetSingleton();
@@ -1467,9 +1545,9 @@ namespace
 			file = k.files[static_cast<std::size_t>(i)];
 		}
 		BSResource::ID id;
-		id.GenerateFromPath(file.c_str());
+		idFromPath(id, file.c_str());
 		BSSoundHandle h;
-		am->GetSoundHandleByFile(h, id, 0x1A, 0);
+		soundHandleByFile(am, h, id, 0x1A, 0);
 		if (!h.IsValid())
 			return;
 		auto* root = a->Get3D(false);

@@ -22,7 +22,7 @@ static const std::unordered_set<std::string>& lookKeys()
 {
 	static const std::unordered_set<std::string> k{
 		"LipMargin", "LipDepthSlab", "LipLaneWidth", "UpperLipMax", "LowerLipMax", "CornerMax", "Stretch", "MinOpen", "MinCorner",
-		"MouthExtra", "JawUnits", "LipUnits", "WidenUnits", "MorphMax", "LipCloseMax", "UpperLipDown", "LowerLipUp", "LipsAlongShaft",
+		"LowerLipRound", "MouthExtra", "JawUnits", "LipUnits", "WidenUnits", "MorphMax", "LipCloseMax", "UpperLipDown", "LowerLipUp", "LipsAlongShaft",
 		"FollowAim", "AimRadius", "AimMaxDeg", "ThroatFrom", "ThroatFull", "ThroatShape", "ThroatBand", "ThroatFill", "ThroatRest",
 		"ThroatShapeGain", "ThroatShapeMax", "ThroatWideUnits", "ThroatWideExtra", "ThroatDetail", "ThroatMotion", "ThroatMotionLength",
 		"LipRound", "MouthWideGain", "MouthWideMax", "CornerOpen", "ThroatAxisFit", "CheekGain", "CheekMax", "CheekInner",
@@ -155,6 +155,7 @@ void Config::applyKey(const std::string& k, const std::string& v)
 		else if (k == "LipCloseMax") fl(lipCloseMax);
 		else if (k == "UpperLipDown") fl(upperLipDown);
 		else if (k == "LowerLipUp") fl(lowerLipUp);
+		else if (k == "LowerLipRound") fl(lowerLipRound);
 		else if (k == "LipsAlongShaft") bl(lipsAlongShaft);
 		else if (k == "FollowAim") bl(followAim);
 		else if (k == "AimRadius") fl(aimRadius);
@@ -242,7 +243,7 @@ std::vector<std::pair<std::string, std::string>> Config::keyValues(bool lookOnly
 		{ "ThroatWideExtra", f2(throatWideExtra) }, { "ThroatDetail", f2(throatDetail) },
 		{ "ThroatMotion", f2(throatMotion) }, { "ThroatMotionLength", f2(throatMotionLen) },
 		{ "TeethOpen", b2(teethOpen) }, { "LipCloseMax", f2(lipCloseMax) }, { "UpperLipDown", f2(upperLipDown) },
-		{ "LowerLipUp", f2(lowerLipUp) }, { "LipsAlongShaft", b2(lipsAlongShaft) },
+		{ "LowerLipUp", f2(lowerLipUp) }, { "LowerLipRound", f2(lowerLipRound) }, { "LipsAlongShaft", b2(lipsAlongShaft) },
 		{ "FollowAim", b2(followAim) }, { "AimRadius", f2(aimRadius) }, { "AimMaxDeg", f2(aimMaxDeg) },
 		{ "DetectShapes", b2(detectShapes) }, { "ShapeFlare", f2(shapeFlare) }, { "ShapeKnotOpen", f2(shapeKnotOpen) },
 		{ "ExtraPush", b2(extraPush) }, { "ExtraDepth", f2(extraDepth) }, { "ExtraChance", f2(extraChance) }, { "ExtraHold", f2(extraHold) },

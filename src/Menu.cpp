@@ -289,6 +289,8 @@ namespace DeepFit::Menu
 			ch |= Slider("Lower lip, at most", &c.lowerLipMax, 0.0f, 4.5f, "%.1f");
 			ch |= Slider("Lower lip up", &c.lowerLipUp, 0.0f, 1.2f, "%.2f");
 			Help("While the mouth is full the lower lip is pushed up this far (its middle fully, the sides a little less), closer round the shaft.");
+			ch |= Slider("Round the lower lip", &c.lowerLipRound, 0.0f, 1.5f, "%.2f units");
+			Help("As the jaw opens, the sides of the lower lip (between its middle and the corners) push out and down, so the opening is round instead of a diamond pinched in at the sides of the lower lip. 0 = off. Needs the 0.4.4 head morphs (DF_LowerLipRound).");
 			Section("Corners");
 			ch |= Slider("Corners, at most", &c.cornerMax, 0.0f, 2.5f, "%.1f");
 			ch |= Slider("Mouth opens to the sides", &c.mouthWideGain, 0.0f, 2.5f, "x%.2f");
