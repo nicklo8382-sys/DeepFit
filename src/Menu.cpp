@@ -263,8 +263,14 @@ namespace DeepFit::Menu
 		void Page(bool (*body)(Config&, bool))
 		{
 			auto& m = Config::get();
-			if (body(m, false))
-				m.save();
+			// 0.4.6: the main (men's / human) set in a drop-down too, like the women's and each head profile's (open at first)
+			if (ImGuiMCP::CollapsingHeader(T("Men's heads (human)"), ImGuiMCP::ImGuiTreeNodeFlags_DefaultOpen)) {
+				ImGuiMCP::TextDisabled("%s", T("Every man's head without a head profile below; saved to DeepFit.ini."));
+				ImGuiMCP::PushID("men");
+				if (body(m, false))
+					m.save();
+				ImGuiMCP::PopID();
+			}
 			ImGuiMCP::Spacing();
 			if (ImGuiMCP::CollapsingHeader(T("Women's heads (built for DeepFit)"))) {
 				auto& f = Config::female();
@@ -302,8 +308,8 @@ namespace DeepFit::Menu
 			ch |= Slider("Stretch past the shaft", &c.stretch, -1.0f, 1.0f, "%.2f");
 			ch |= Slider("Close in round a slim shaft", &c.lipCloseMax, 0.0f, 4.0f, "%.2f");
 			ch |= Slider("Upper lip, at most", &c.upperLipMax, 0.0f, 3.0f, "%.1f");
-			ch |= Slider("Upper lip down", &c.upperLipDown, 0.0f, 3.0f, "%.2f");
-			Help("While the mouth is full the upper lip is pulled down this far (its middle fully, the sides a little less) - the lip-round morph peaks it up towards the nose.");
+			ch |= Slider("Upper lip down", &c.upperLipDown, -2.0f, 3.0f, "%.2f");
+			Help("While the mouth is full the upper lip is pulled down this far (its middle fully, the sides a little less) - the lip-round morph peaks it up towards the nose. Below 0 it is lifted instead (a cat's muzzle rising off the shaft).");
 			ch |= Slider("Upper lip closes onto the shaft", &c.upperLipClose, 1.0f, 3.0f, "x%.2f");
 			Help("On a shallow stroke the thinner front of the shaft rides low in his mouth and the upper lip has further to come down. Its bones are only half weighted in the head, so they need to move about twice as far as the lip should: raise this if the upper lip floats above the shaft (2 = about right for SMP Head). Needs \"Close in round a slim shaft\" above 0.");
 			ch |= Slider("Lower lip, at most", &c.lowerLipMax, 0.0f, 4.5f, "%.1f");
@@ -393,6 +399,8 @@ namespace DeepFit::Menu
 			ch |= Slider("Room before the cheek", &c.cheekInner, 0.5f, 3.0f, "%.1f units");
 			Section("Teeth");
 			ch |= Check("Teeth part while the mouth is full", &c.teethOpen);
+			ch |= Check("Hide his teeth during a scene", &c.teethHide);
+			Help("His teeth and tongue (the parts named in TeethParts) are hidden while he is in a scene and shown again after. Beast heads have it on: their jaw drops further than their teeth go with it.");
 			{
 				static const char* kTeeth[] = { "Off", "While the mouth is full", "The whole scene" };
 				ImGuiMCP::Text("%s", T("Move the teeth:"));
@@ -446,7 +454,7 @@ namespace DeepFit::Menu
 				ImGuiMCP::TextDisabled(T("His throat shows the shaft from %.1f to %.1f units past his lips."), c.throatFrom, c.throatFrom + 10.0f * c.throatBand);
 				ch |= Slider("Throat starts at", &c.throatFrom, 0.0f, 12.0f, "%.1f units deep");
 				Help("How far past his lips the schlong has to be to reach the top of his throat (under his chin).");
-				ch |= Slider("Shaft per band", &c.throatBand, 0.3f, 2.0f, "%.2f units");
+				ch |= Slider("Shaft per band", &c.throatBand, 0.3f, 3.0f, "%.2f units");
 				Help("How much of the shaft's length each of the ten bands stands for (smaller = the throat shows a shorter stretch of it, in more detail).");
 				ch |= Check("Measure along the shaft", &c.throatAxisFit);
 				Help("Measures the shaft along its own line, so one that goes in at an angle or bends reads its real thickness. Off: sliced straight back from his lips.");
@@ -595,6 +603,8 @@ namespace DeepFit::Menu
 				Slider("Tip to his right", &pv.yaw, -40.0f, 40.0f, "%.0f degrees");
 				Help("Places and angles the test schlong in his mouth (negative = lower / to his left / tip down). The lips, cheeks and throat fit it where it is, the same as a real one.");
 				if (ImGuiMCP::Button(T("Centre it"))) { pv.up = pv.side = pv.pitch = pv.yaw = 0.0f; }
+				Check("Keep it in the middle of the open mouth", &pv.autoCentre);
+				Help("The jaw opens downward, so the middle of his lips at rest ends up high in the open mouth: this lowers the test schlong by half of how far the jaw has dropped, keeping it in the middle of the opening. \"Enters higher\" moves it from there.");
 				Slider("Tilt my head back", &pv.tilt, 0.0f, 45.0f, "%.0f degrees");
 				Help("Tilts the player's head back (chin up) while testing, so the throat bulge is easier to see.");
 			}
@@ -668,6 +678,10 @@ namespace DeepFit::Menu
 				}
 				if (ImGuiMCP::Button(T("Reload head files")))
 					DeepFit::RequestHeadReload();
+				ImGuiMCP::SameLine();
+				if (ImGuiMCP::Button(T("Refresh my head")))
+					DeepFit::RequestPlayerRefresh();
+				Help("After changing race or head (RaceMenu): DeepFit lets go of your old head and finds your new one's bones, head profile and teeth again at once - no scene needed.");
 				Help("Each head DeepFit fits can have a profile: a file in Data\\SKSE\\Plugins\\DeepFit\\Heads. It names the races (or head meshes) it is for, the head's bones and which way each pushes, and keeps that head's own settings (the drop-downs at the bottom of each page). To add a head, copy one of the files, change it and press Reload - nothing needs compiling. Heads without a profile use the settings above.");
 			}
 

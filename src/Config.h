@@ -64,6 +64,7 @@ struct Config
 	float throatMotion = 0.4f;     // 0.3.6: a ripple that slides along his throat with every stroke (units; 0 = off)
 	float throatMotionLen = 2.0f;  // 0.3.6: its length along the shaft (units)
 	float throatDetail = 1.6f;     // 0.3.5: a flare / ring / knot this many times more pronounced than the shaft's own
+	bool  teethHide = false;       // 0.4.6: his teeth (and tongue - the TeethParts) hidden while he is in a scene (beast heads: the jaw drops past them)
 	bool  teethOpen = true;        // the SMP Head teeth-open modifier (12) while the shaft is in his mouth
 	int   teethMove = 1;           // 0.4.0: teeth moved down / back: 0 off, 1 while the mouth is full, 2 the whole scene (0.4.2)
 	float teethDown = 0.3f;        // units

@@ -185,6 +185,9 @@ namespace
 		// 0.4.0: the teeth moved down / back (their head-bone weights hung on a node of DeepFit's own under his head)
 		struct TeethHook { NiPointer<BSGeometry> geo; std::uint32_t idx; NiPointer<NiAVObject> orig; };
 		std::vector<TeethHook> teethHooks;
+		std::vector<NiPointer<NiAVObject>> teethHidden;   // 0.4.6: his teeth / mouth parts hidden for the scene
+		std::vector<NiPointer<NiAVObject>> teethBones;    // 0.4.7: "DF Teeth Only" bones in his mouth parts (the teeth alone - the tongue stays)
+		float                  hideScan = 0.0f;
 		NiPointer<NiNode>      teethNode;
 		float                  teethK = 0.0f, teethScan = 0.0f;
 		NiPoint3               mouthC{ 0, 0, 0 };        // 0.4.0: the middle of his lips (world), and the test schlong's
@@ -239,6 +242,10 @@ namespace
 		// the schlong really is in some games (140 units off, so the mouth never found it): each frame the skinned points
 		// are checked against the bone line, and when they are off the shaft is built round the bones instead
 		std::vector<NiPointer<NiAVObject>> chain;
+		// 0.4.7: a bone his mesh names but the game draws it with another one's transform (a creature's parts re-attached
+		// to its skeleton) - read where it is drawn
+		std::unordered_map<const NiAVObject*, const NiTransform*> drawnBy;
+		int                     drawnOther = 0;
 		float                   radius = 1.6f;
 		int                     method = -1;   // 0 the mesh, 1 the bone line (last frame), for the log
 		float                   meshOff = 0.0f;
@@ -369,6 +376,16 @@ namespace
 	// mouth on screen was read 25 units off and the mouth never opened)
 	std::unordered_map<const NiAVObject*, NiTransform> g_snap;
 	bool                                               g_useSnap = false;
+	std::unordered_map<const NiTransform*, NiTransform> g_snapT;   // 0.4.7: the same, by the transform the game draws with
+	const NiTransform& tOf(const NiTransform* t)
+	{
+		if (g_useSnap) {
+			auto it = g_snapT.find(t);
+			if (it != g_snapT.end())
+				return it->second;
+		}
+		return *t;
+	}
 	const NiTransform& wOf(const NiAVObject* o)
 	{
 		if (g_useSnap) {
@@ -377,6 +394,12 @@ namespace
 				return it->second;
 		}
 		return o->world;
+	}
+	// a partner's bone as the game draws it (its own transform, or the one its mesh is drawn with), as the last frame ended
+	const NiTransform& wP(const Partner& p, const NiAVObject* o)
+	{
+		auto it = p.drawnBy.find(o);
+		return it != p.drawnBy.end() ? tOf(it->second) : wOf(o);
 	}
 	float                                g_logTimer = 0.0f;
 
@@ -496,8 +519,14 @@ namespace
 				return nullptr;
 		}
 
-		// (re)build
+		// (re)build - 0.4.7: his face rebuilt under the same body (often in a scene) keeps where his mouth was, instead of
+		// snapping shut and easing open again (the chin jittered every few seconds)
+		float keepMorph[kMorphs];
+		std::copy(std::begin(r.morph), std::end(r.morph), keepMorph);
+		const bool keep = r.root == root;
 		r = Receiver{};
+		if (keep)
+			std::copy(std::begin(keepMorph), std::end(keepMorph), r.morph);
 		r.root = root;
 		r.actor = actor->GetHandle();
 		r.checked = true;
@@ -562,6 +591,8 @@ namespace
 		p.looked = p.genital = 0;
 		p.root = root;
 		p.age = 0.0f;
+		p.drawnBy.clear();
+		p.drawnOther = 0;
 		p.chain = findChain(root);
 		p.anyMesh = false;
 		if (p.chain.empty() && Config::get().anyMeshAtLips) {   // 0.4.0: no schlong bones known or guessed: is any of his mesh weighted to one?
@@ -717,8 +748,9 @@ namespace
 					const std::uint32_t b = sv.bone[kb];
 					if (b >= nb || !si->bones[b])
 						continue;
-					const NiPoint3 q = (wOf(si->bones[b]) * sd->boneData[b].skinToBone) * sv.skinPos;
-					dd.push_back(len(q - wOf(si->bones[b]).translate));
+					const NiTransform& bw = (si->boneWorldTransforms && si->boneWorldTransforms[b]) ? tOf(si->boneWorldTransforms[b]) : wOf(si->bones[b]);
+					const NiPoint3 q = (bw * sd->boneData[b].skinToBone) * sv.skinPos;
+					dd.push_back(len(q - bw.translate));
 				}
 				if (dd.empty())
 					return 1e9f;
@@ -735,6 +767,18 @@ namespace
 							geom->name.c_str() ? geom->name.c_str() : "?", sp->numPartitions, b, a);
 					shape = std::move(alt);
 				}
+			}
+			if (!shape.verts.empty() && si->boneWorldTransforms) {   // 0.4.7: bones drawn with another bone's transform
+				int other = 0;
+				for (std::uint32_t i = 0; i < nb; ++i)
+					if (si->bones[i] && si->boneWorldTransforms[i] && si->boneWorldTransforms[i] != &si->bones[i]->world) {
+						p.drawnBy[si->bones[i]] = si->boneWorldTransforms[i];
+						++other;
+					}
+				p.drawnOther += other;
+				if (other && Config::get().debugLog)
+					logs::info("DeepFit: {} is drawn with other bones than it names ({} of {}) - read as it is drawn",
+						geom->name.c_str() ? geom->name.c_str() : "?", other, nb);
 			}
 			if (!shape.verts.empty()) {
 				if (Config::get().debugLog)   // 0.4.2: which parts of him are read
@@ -778,7 +822,7 @@ namespace
 	{
 		std::vector<NiPoint3> b;
 		for (auto& n : p.chain)
-			if (n) b.push_back(wOf(n.get()).translate);
+			if (n) b.push_back(wP(p, n.get()).translate);
 		if (b.size() < 2)
 			return;
 		const NiPoint3 last = b.back() - b[b.size() - 2];
@@ -859,7 +903,8 @@ namespace
 				auto* b = si->bones[i];
 				if (!b)
 					continue;
-				xf[i] = wOf(b) * sd->boneData[i].skinToBone;
+				const NiTransform* dt = si->boneWorldTransforms ? si->boneWorldTransforms[i] : nullptr;   // 0.4.7: as the game draws it
+				xf[i] = (dt ? tOf(dt) : wOf(b)) * sd->boneData[i].skinToBone;
 				ok[i] = true;
 			}
 			for (auto& sv : shape.verts) {
@@ -885,7 +930,7 @@ namespace
 			for (std::size_t i = 0; i < p.world.size(); i += step) {
 				float best = 1e9f;
 				for (std::size_t k = 0; k + 1 < p.chain.size(); ++k) {
-					const NiPoint3 a = wOf(p.chain[k].get()).translate, b = wOf(p.chain[k + 1].get()).translate, ab = b - a;
+					const NiPoint3 a = wP(p, p.chain[k].get()).translate, b = wP(p, p.chain[k + 1].get()).translate, ab = b - a;
 					const float    l2 = dot(ab, ab);
 					const float    t = l2 > 1e-6f ? std::clamp(dot(p.world[i] - a, ab) / l2, 0.0f, 1.0f) : 0.0f;
 					best = std::min(best, len(p.world[i] - (a + ab * t)));
@@ -933,13 +978,14 @@ namespace
 
 	// 0.4.1: the test schlong placed and angled in his face's frame (right, forward, up from the middle of his lips): tip up
 	// by Pitch, to his right by Yaw, entering Up / Side off the middle. The lips fit what is placed, so it still collides.
+	float g_previewDrop = 0.0f;   // 0.4.6: the test schlong lowered to the middle of the open mouth (half the jaw's drop)
 	NiPoint3 previewPlace(const NiPoint3& p)
 	{
 		const auto& pv = g_preview;
 		const float a = -pv.pitch * 0.01745329f, b = pv.yaw * 0.01745329f;
 		NiPoint3 q(p.x, p.y * std::cos(a) - p.z * std::sin(a), p.y * std::sin(a) + p.z * std::cos(a));
 		q = NiPoint3(q.x * std::cos(b) - q.y * std::sin(b), q.x * std::sin(b) + q.y * std::cos(b), q.z);
-		return NiPoint3(q.x + pv.side, q.y, q.z + pv.up);
+		return NiPoint3(q.x + pv.side, q.y, q.z + pv.up + g_previewDrop);
 	}
 
 	void solve(Receiver& r, const std::vector<NiPoint3>& shaft, float delta, bool preview = false)
@@ -997,6 +1043,14 @@ namespace
 		}
 		// 0.4.0: the test page - a made-up schlong straight into his mouth (no scene needed), with the chosen shape
 		if (preview) {
+			{   // 0.4.6: the jaw opens downward - centre it in the opening, not at the lips' middle at rest
+				float drop = 4.1f;
+				auto& heads = Heads::All();
+				if (r.profile >= 0 && r.profile < static_cast<int>(heads.size()))
+					drop = heads[r.profile].jawDrop;
+				const float want = g_preview.autoCentre ? -0.5f * drop * std::clamp(r.morph[0] / 100.0f, 0.0f, 1.0f) : 0.0f;
+				g_previewDrop += (want - g_previewDrop) * (1.0f - std::exp(-delta * 6.0f));
+			}
 			hs.clear();
 			const auto& pv = g_preview;
 			float D = std::max(pv.depth, 0.5f);
@@ -1441,8 +1495,9 @@ namespace
 					// mouth on a shallow stroke) - harder, as its bones are only half weighted
 					if (spec.kind == Kind::Lip && r.dir(i).z > 0.0f && inMouth && target[i] < 0.0f && cfg.upperLipClose != 1.0f)
 						target[i] *= cfg.upperLipClose;
-					if (spec.kind == Kind::Lip && r.dir(i).z > 0.0f && inMouth && cfg.upperLipDown > 0.0f)
-						target[i] -= cfg.upperLipDown * (i == kUpperCenter ? 1.0f : 0.6f);
+					// (0.4.7: below 0 lifts it instead - a cat's muzzle rises off the shaft as the jaw opens wide)
+					if (spec.kind == Kind::Lip && r.dir(i).z > 0.0f && inMouth && cfg.upperLipDown != 0.0f)
+						target[i] = std::min(target[i] - cfg.upperLipDown * (i == kUpperCenter ? 1.0f : 0.6f), mx + std::max(-cfg.upperLipDown, 0.0f));
 					// 0.4.1: and the lower lip up (the jaw morph drops it further than the shaft needs)
 					if (spec.kind == Kind::Lip && r.dir(i).z < 0.0f && inMouth && cfg.lowerLipUp > 0.0f)
 						target[i] -= cfg.lowerLipUp * (i == kBottomCenter ? 1.0f : 0.6f);
@@ -1887,6 +1942,86 @@ namespace
 	// it ("DeepFit Teeth"), so they follow his head exactly and only that node is moved. The game rebuilding the face puts
 	// them back on the head bone: they are checked every second and hung on it again. Mode 1 while the mouth is full,
 	// mode 2 always (only the actors DeepFit fits, and only when chosen).
+	// 0.4.6: his teeth and mouth parts (TeethParts) hidden while he is in a scene - on a beast head the jaw drops past them
+	// (they follow only its own jaw shape) - and shown again after
+	void hideTeeth(Receiver& r, Actor* act, float delta)
+	{
+		const auto& cfg = cfgOf(r);
+		const bool  hide = cfg.teethHide && r.inScene;
+		if (!hide) {
+			for (auto& o : r.teethHidden)
+				if (o)
+					o->SetAppCulled(false);
+			r.teethHidden.clear();
+			for (auto& b : r.teethBones)
+				if (b) {
+					b->local.scale = 1.0f;
+					if (b->parent)
+						b->world = b->parent->world * b->local;
+				}
+			r.teethBones.clear();
+			return;
+		}
+		for (auto& b : r.teethBones)   // 0.4.7: shrunk to nothing every frame (the teeth only)
+			if (b) {
+				b->local.scale = 0.001f;
+				if (b->parent)   // (as the mouth bones: its world set here too - the game may not update it)
+					b->world = b->parent->world * b->local;
+			}
+		r.hideScan -= delta;
+		if (r.hideScan > 0.0f && (!r.teethHidden.empty() || !r.teethBones.empty()))
+			return;
+		r.hideScan = 1.0f;   // again every second (the face is sometimes rebuilt)
+		auto* root = act ? act->Get3D(false) : nullptr;
+		if (!root)
+			return;
+		// 0.4.7: a mouth whose teeth hang on their own bone (DeepFit's Argonian mouth): only that bone is shrunk - his
+		// tongue and gums stay
+		r.teethBones.clear();
+		traverse(root, [&](NiAVObject* o) {
+			if (o && !o->AsGeometry() && o->name.c_str() && std::strcmp(o->name.c_str(), "DF Teeth Only") == 0) {
+				o->local.scale = 0.001f;
+				r.teethBones.emplace_back(o);
+			}
+		});
+		if (!r.teethBones.empty()) {
+			if (cfg.debugLog && r.teethHidden.empty())
+				logs::info("DeepFit: his teeth hidden for the scene (their own bone - the tongue stays)");
+			for (auto& o : r.teethHidden)   // (a part hidden before the bone was found)
+				if (o)
+					o->SetAppCulled(false);
+			r.teethHidden.clear();
+			return;
+		}
+		std::vector<std::string> parts;
+		{
+			std::string cur;
+			for (char c : Config::get().teethParts + ",") {
+				if (c == ',') {
+					while (!cur.empty() && cur.back() == ' ') cur.pop_back();
+					if (!cur.empty()) parts.push_back(cur);
+					cur.clear();
+				} else if (!(cur.empty() && c == ' '))
+					cur += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+			}
+		}
+		traverse(root, [&](NiAVObject* o) {
+			auto* geo = o ? o->AsGeometry() : nullptr;
+			if (!geo || geo->GetAppCulled())
+				return;
+			std::string lo = geo->name.c_str() ? geo->name.c_str() : "";
+			for (auto& c : lo) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+			bool match = false;
+			for (auto& pt : parts) match |= lo.find(pt) != std::string::npos;
+			if (!match)
+				return;
+			geo->SetAppCulled(true);
+			r.teethHidden.emplace_back(geo);
+			if (cfg.debugLog)
+				logs::info("DeepFit: {} hidden for the scene", geo->name.c_str() ? geo->name.c_str() : "?");
+		});
+	}
+
 	void updateTeeth(Receiver& r, Actor* act, float delta)
 	{
 		auto& cfg = cfgOf(r);
@@ -2238,7 +2373,7 @@ namespace
 				logs::info("DeepFit: not aimed at his lips - {} ({:.1f} / {:.1f})", r, a, b);
 			}
 		};
-		const NiPoint3 B = wOf(p.chain.front().get()).translate, T = wOf(p.chain.back().get()).translate;
+		const NiPoint3 B = wP(p, p.chain.front().get()).translate, T = wP(p, p.chain.back().get()).translate;
 		const NiPoint3 d = T - B, v = C - B;
 		const float    L = len(d), lv = len(v);
 		if (L < 1.0f || lv < 1.0f || lv > L * 1.8f + 4.0f)
@@ -2394,6 +2529,7 @@ namespace
 	void snapPartners()
 	{
 		g_snap.clear();
+		g_snapT.clear();
 		g_useSnap = Config::get().readAfterPpa;
 		if (!g_useSnap)
 			return;
@@ -2412,6 +2548,10 @@ namespace
 				for (std::uint32_t i = 0; i < nb; ++i)
 					if (auto* b = si->bones[i])
 						g_snap[b] = b->world;
+				if (si->boneWorldTransforms)
+					for (std::uint32_t i = 0; i < nb; ++i)
+						if (const NiTransform* t = si->boneWorldTransforms[i])
+							g_snapT[t] = *t;
 			}
 		}
 	}
@@ -2535,7 +2675,10 @@ void DeepFit::Install()
 namespace
 {
 	std::atomic<bool> g_reloadHeads{ false };
+	std::atomic<bool> g_refreshPlayer{ false };
 }
+
+void DeepFit::RequestPlayerRefresh() { g_refreshPlayer = true; }
 
 void DeepFit::RequestHeadReload() { g_reloadHeads = true; }
 
@@ -2558,6 +2701,38 @@ std::string DeepFit::PlayerHeadText()
 
 void DeepFit::OnFrame(float delta)
 {
+	if (g_refreshPlayer.exchange(false)) {   // 0.4.7: the menu's "Refresh my head" - everything DeepFit did to his old head given
+		                                       // back, then his head looked at again from scratch (race / head changed)
+		if (auto* pc = RE::PlayerCharacter::GetSingleton()) {
+			auto it = g_receivers.find(pc->GetFormID());
+			if (it != g_receivers.end()) {
+				auto& r = it->second;
+				for (int i = 0; i < r.nspecs(); ++i)
+					if (r.bones[i].valid && r.bones[i].node)
+						r.bones[i].node->local.translate = r.bones[i].restLocal;
+				for (auto& h : r.teethHooks) {
+					auto* si = h.geo ? h.geo->GetGeometryRuntimeData().skinInstance.get() : nullptr;
+					if (si && si->bones && si->skinData && h.idx < si->skinData->bones && si->bones[h.idx] == r.teethNode.get() && h.orig) {
+						si->bones[h.idx] = h.orig.get();
+						si->boneWorldTransforms[h.idx] = &h.orig->world;
+					}
+				}
+				for (auto& o : r.teethHidden)
+					if (o)
+						o->SetAppCulled(false);
+				for (auto& b : r.teethBones)
+					if (b)
+						b->local.scale = 1.0f;
+				g_receivers.erase(it);
+			}
+			{
+				std::lock_guard lk(g_faceLock);
+				g_face.erase(pc->GetFormID());
+				g_faceN = static_cast<int>(g_face.size());
+			}
+			logs::info("DeepFit: your head will be looked at again (menu)");
+		}
+	}
 	if (g_reloadHeads.exchange(false)) {   // 0.4.6: the menu's "Reload head files" (here, so no head is mid-fit)
 		Heads::Load();
 		logs::info("DeepFit: head profiles reloaded ({})", Heads::All().size());
@@ -2678,6 +2853,7 @@ void DeepFit::OnFrame(float delta)
 		sendMouth(*r, delta);
 		soundsFor(*r, recv);   // 0.4.4
 		updateTeeth(*r, recv, delta);
+		hideTeeth(*r, recv, delta);
 		if (recv->IsPlayerRef())
 			updateTestShaft(*r);   // 0.4.0: the test schlong, shown
 		if (r->full && main && mainP) {   // 0.4.0: what the menu shows

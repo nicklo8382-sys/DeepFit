@@ -13,6 +13,7 @@ head you built), copy one of the files, rename it and change it - nothing needs 
   Sex         male, female or any
   JawPhoneme  a head without DeepFit's morphs (PPA_JawWide): its jaw opens with this phoneme instead
               (Aah, BigAah, BMP, ChJSh, DST, Eee, Eh, FV, I, K, N, Oh, OohQ, R, Th, W - BigAah = wide open)
+  JawDrop     how far the lower lip drops with the jaw fully open (units, 4.1 if not set) - the test page centres in it
 
 [Bones]
   Bone Name = Kind, x, y, z

@@ -27,7 +27,7 @@ static const std::unordered_set<std::string>& lookKeys()
 		"FollowAim", "AimRadius", "AimMaxDeg", "ThroatFrom", "ThroatFull", "ThroatShape", "ThroatBand", "ThroatFill", "ThroatRest",
 		"ThroatShapeGain", "ThroatShapeMax", "ThroatWideUnits", "ThroatWideExtra", "ThroatDetail", "ThroatMotion", "ThroatMotionLength",
 		"LipRound", "MouthWideGain", "MouthWideMax", "CornerOpen", "ThroatAxisFit", "CheekGain", "CheekMax", "CheekInner",
-		"GulpSize", "GulpTime", "GagJaw", "GagSqueeze", "GagTime", "ShapeRidge", "ShapeKnob", "TeethOpen", "TeethMove", "TeethDown",
+		"GulpSize", "GulpTime", "GagJaw", "GagSqueeze", "GagTime", "ShapeRidge", "ShapeKnob", "TeethOpen", "TeethMove", "TeethHide", "TeethDown",
 		"TeethBack", "FaceReact", "FaceEyes", "FaceBrows", "FaceGag", "LipDrag", "LipDragSpeed", "RecoverHold", "RecoverOpen",
 		"RecoverGulp", "AutoGagGulp", "AutoDeep", "AutoGagSpeed", "AutoGagCooldown", "AutoGulpHold",
 		"SoundGulp", "SoundGag", "SoundGasp", "SoundOwnOnly", "ExtraPush", "ExtraDepth", "ExtraChance", "ExtraHold", "ExtraSwell", "ShapeFlare", "ShapeKnotOpen" };
@@ -154,6 +154,7 @@ void Config::applyKey(const std::string& k, const std::string& v)
 		else if (k == "ThroatMotionLength") fl(throatMotionLen);
 		else if (k == "TeethOpen") bl(teethOpen);
 		else if (k == "LipCloseMax") fl(lipCloseMax);
+		else if (k == "TeethHide") bl(teethHide);
 		else if (k == "ReadAfterPPA") bl(readAfterPpa);
 		else if (k == "UpperLipClose") fl(upperLipClose);
 		else if (k == "UpperLipDown") fl(upperLipDown);
@@ -235,7 +236,7 @@ std::vector<std::pair<std::string, std::string>> Config::keyValues(bool lookOnly
 		{ "ThroatMorphMax", f2(throatMorphMax) }, { "ThroatFrom", f2(throatFrom) }, { "ThroatFull", f2(throatFull) },
 		{ "MalesOnly", b2(malesOnly) }, { "ThroatAxisFit", b2(throatAxisFit) },
 		{ "GuessRigs", b2(guessRigs) }, { "AnyMeshAtLips", b2(anyMeshAtLips) },
-		{ "TeethMove", std::to_string(teethMove) }, { "TeethDown", f2(teethDown) }, { "TeethBack", f2(teethBack) }, { "TeethParts", teethParts },
+		{ "TeethMove", std::to_string(teethMove) }, { "TeethHide", b2(teethHide) }, { "TeethDown", f2(teethDown) }, { "TeethBack", f2(teethBack) }, { "TeethParts", teethParts },
 		{ "FaceReact", b2(faceReact) }, { "FaceEyes", f2(faceEyes) }, { "FaceBrows", f2(faceBrows) }, { "FaceGag", f2(faceGag) },
 		{ "LipDrag", f2(lipDrag) }, { "LipDragSpeed", f2(lipDragSpeed) },
 		{ "RecoverHold", f2(recoverHold) }, { "RecoverOpen", f2(recoverOpen) }, { "RecoverGulp", b2(recoverGulp) },

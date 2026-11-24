@@ -19,6 +19,7 @@ namespace DeepFit
 		float tilt = 0.0f;      // 0.4.1: his head tilted back (degrees) - his throat is easier to see
 		int   size = -1;        // 0.4.0: -1 the sliders, 0-4 TNG's XS / S / M / L / XL, 5 the player's own TNG size (a plain shape)
 		bool  show = true;      // 0.4.0: a plain schlong shown in his mouth
+		bool  autoCentre = true;   // 0.4.6: kept in the middle of the open mouth (it opens downward, so the lips' middle at rest is high)
 	};
 	struct TngSizes   // 0.4.0: TNG's size scales (its MCM's), and the player's own size category
 	{
@@ -32,7 +33,8 @@ namespace DeepFit
 	void     RescanSounds();
 	void     AskTng();          // asks TNG again (on the game's thread, next frame)
 	Preview& GetPreview();
-	void     RequestHeadReload();     // 0.4.6: read the head profiles again (on the game's thread, next frame)
+	void     RequestHeadReload();
+	void     RequestPlayerRefresh();  // 0.4.7: his head looked at again (after a race / head change), next frame     // 0.4.6: read the head profiles again (on the game's thread, next frame)
 	std::string PlayerHeadText();    // 0.4.6: which head profile the player's head uses, and its bones found
 	std::string StatusText(std::string* a_race = nullptr, float* a_ago = nullptr);   // 0.4.0: what DeepFit last found (the menu)
 	void Install();            // frame driver (at input loaded)

@@ -73,7 +73,9 @@ namespace
 					h.races = list(v);
 				else if (lk == "headmeshes")
 					h.meshes = list(v);
-				else if (lk == "jawphoneme") {   // 0.4.5
+				else if (lk == "jawdrop") {   // 0.4.6
+					try { h.jawDrop = std::stof(v); } catch (...) {}
+				} else if (lk == "jawphoneme") {   // 0.4.5
 					static const char* kPh[] = { "aah", "bigaah", "bmp", "chjsh", "dst", "eee", "eh", "fv", "i", "k", "n", "oh", "oohq", "r", "th", "w" };
 					const std::string ph = lower(v);
 					for (int i = 0; i < 16; ++i)

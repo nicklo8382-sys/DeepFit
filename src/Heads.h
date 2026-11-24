@@ -20,6 +20,7 @@ struct HeadProfile
 	std::vector<std::string> meshes;       // head mesh file names, lower case ("maleheadargonian.nif")
 	int                      sex = 0;      // 0 men, 1 women, -1 both
 	std::vector<HeadBone>    bones;        // bones it adds or changes (the rest keep DeepFit's own list)
+	float                    jawDrop = 4.1f;    // 0.4.6: how far his lower lip drops with the jaw fully open (units; the test centres in it)
 	int                      jawPhoneme = -1;   // 0.4.5: a head without DeepFit's morphs opens its jaw with this phoneme (BigAah = 1)
 	Config                   cfg;          // its per-head settings (shared settings come from the main set)
 };
