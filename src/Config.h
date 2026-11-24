@@ -91,9 +91,12 @@ struct Config
 	float lowerLipRound = 0.5f;    // 0.4.4: the lower lip's sides pushed out and down as the jaw opens (units at a full jaw)
 	float lowerLipUp = 0.0f;       // 0.4.1: the lower lip pushed up this far while the mouth is full
 	bool  lipsAlongShaft = true;   // 0.4.1: the mouth opens to the shaft measured across it (not straight up and down his face)
+	bool  readAfterPpa = true;     // 0.4.5: his schlong read as PPA left it last frame (its aim into the mouth), not as the animation has it
 	bool  followAim = true;        // 0.4.3: a shaft whose line passes his lips is turned onto them (as PPA aims it)
 	float aimRadius = 10.0f;       // ... when it passes within this many units of them
 	float aimMaxDeg = 45.0f;       // ... turned at most this far
+	float upperLipClose = 1.0f;    // 0.4.5: the upper lip comes down onto a shaft lower than it this many times harder (its bones are
+	                               // only half weighted, so a 2-unit move shows as 1)
 	float upperLipDown = 0.6f;     // 0.3.3: the upper lip pulled down this far while the mouth is full (the lip morph peaks it up to the nose)
 	float noseFollow = 0.5f;       // nose base rises by this fraction of the upper-lip-center push
 	float noseMax = 0.5f;

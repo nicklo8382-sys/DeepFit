@@ -11,6 +11,8 @@ head you built), copy one of the files, rename it and change it - nothing needs 
   HeadMeshes  head mesh file names, comma separated (maleheadargonian.nif) - checked first, so custom races
               that use that head get it too
   Sex         male, female or any
+  JawPhoneme  a head without DeepFit's morphs (PPA_JawWide): its jaw opens with this phoneme instead
+              (Aah, BigAah, BMP, ChJSh, DST, Eee, Eh, FV, I, K, N, Oh, OohQ, R, Th, W - BigAah = wide open)
 
 [Bones]
   Bone Name = Kind, x, y, z

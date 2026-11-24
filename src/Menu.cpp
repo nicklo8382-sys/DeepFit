@@ -302,8 +302,10 @@ namespace DeepFit::Menu
 			ch |= Slider("Stretch past the shaft", &c.stretch, -1.0f, 1.0f, "%.2f");
 			ch |= Slider("Close in round a slim shaft", &c.lipCloseMax, 0.0f, 4.0f, "%.2f");
 			ch |= Slider("Upper lip, at most", &c.upperLipMax, 0.0f, 3.0f, "%.1f");
-			ch |= Slider("Upper lip down", &c.upperLipDown, 0.0f, 1.2f, "%.2f");
+			ch |= Slider("Upper lip down", &c.upperLipDown, 0.0f, 3.0f, "%.2f");
 			Help("While the mouth is full the upper lip is pulled down this far (its middle fully, the sides a little less) - the lip-round morph peaks it up towards the nose.");
+			ch |= Slider("Upper lip closes onto the shaft", &c.upperLipClose, 1.0f, 3.0f, "x%.2f");
+			Help("On a shallow stroke the thinner front of the shaft rides low in his mouth and the upper lip has further to come down. Its bones are only half weighted in the head, so they need to move about twice as far as the lip should: raise this if the upper lip floats above the shaft (2 = about right for SMP Head). Needs \"Close in round a slim shaft\" above 0.");
 			ch |= Slider("Lower lip, at most", &c.lowerLipMax, 0.0f, 4.5f, "%.1f");
 			ch |= Slider("Lower lip up", &c.lowerLipUp, 0.0f, 1.2f, "%.2f");
 			Help("While the mouth is full the lower lip is pushed up this far (its middle fully, the sides a little less), closer round the shaft.");
@@ -381,8 +383,8 @@ namespace DeepFit::Menu
 			ch |= Check("Follow PPA's aim into his mouth", &c.followAim);
 			Help("PPA bends the partner's schlong into his mouth after DeepFit has read where the animation put it. When an animation leaves it a few units off (under his chin), the mouth stayed shut although on screen it was in. On: a shaft whose line passes close by his lips is turned onto them, the way PPA aims it.");
 			if (c.followAim) {
-				ch |= Slider("Aim when it passes within", &c.aimRadius, 2.0f, 20.0f, "%.1f units of his lips");
-				ch |= Slider("Turn it at most", &c.aimMaxDeg, 5.0f, 60.0f, "%.0f degrees");
+				ch |= Slider("Aim when it passes within", &c.aimRadius, 2.0f, 40.0f, "%.1f units of his lips");
+				ch |= Slider("Turn it at most", &c.aimMaxDeg, 5.0f, 90.0f, "%.0f degrees");
 			}
 			Section("Cheeks");
 			ch |= Slider("Cheek bulge", &c.cheekGain, 0.0f, 3.0f, "x%.1f");
@@ -613,6 +615,8 @@ namespace DeepFit::Menu
 			Help("Also fits women whose head is built for DeepFit (its mouth bones, weights and throat morphs), with their own settings - the \"Women's heads\" drop-down at the bottom of each page, saved to DeepFit_Female.ini. Off: only men's mouths.");
 			ch |= Check("Guess unknown skeletons", &c.guessRigs);
 			Help("A partner whose skeleton DeepFit does not know: his schlong bones are found from their names (Penis, Dick, Cock, Genital, Shaft, Knot, or the short \"XD 2\" style many rigs use).");
+			ch |= Check("Read his schlong where PPA aims it", &c.readAfterPpa);
+			Help("PPA bends his schlong into the mouth after the animation, later in the frame than DeepFit runs. On: DeepFit reads it as the last frame ended (where PPA put it, as you see it). Off: as the animation has it (before PPA's aim) - a scene where it is clearly in his mouth but the mouth does not open needs this on.");
 			ch |= Check("Anything at his lips counts", &c.anyMeshAtLips);
 			Help("Last resort for a partner where nothing is found at all: any part of his mesh that reaches the lips opens the mouth and fills the throat. Heavier, and his body near the face can be read too - leave it off unless you need it.");
 			Section("What DeepFit found");

@@ -73,7 +73,13 @@ namespace
 					h.races = list(v);
 				else if (lk == "headmeshes")
 					h.meshes = list(v);
-				else if (lk == "sex") {
+				else if (lk == "jawphoneme") {   // 0.4.5
+					static const char* kPh[] = { "aah", "bigaah", "bmp", "chjsh", "dst", "eee", "eh", "fv", "i", "k", "n", "oh", "oohq", "r", "th", "w" };
+					const std::string ph = lower(v);
+					for (int i = 0; i < 16; ++i)
+						if (ph == kPh[i])
+							h.jawPhoneme = i;
+				} else if (lk == "sex") {
 					const std::string s = lower(v);
 					h.sex = s == "female" ? 1 : (s == "any" || s == "both") ? -1 : 0;
 				}

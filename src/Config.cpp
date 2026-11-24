@@ -23,7 +23,7 @@ static const std::unordered_set<std::string>& lookKeys()
 {
 	static const std::unordered_set<std::string> k{
 		"LipMargin", "LipDepthSlab", "LipLaneWidth", "UpperLipMax", "LowerLipMax", "CornerMax", "Stretch", "MinOpen", "MinCorner",
-		"LowerLipRound", "MouthExtra", "JawUnits", "LipUnits", "WidenUnits", "MorphMax", "LipCloseMax", "UpperLipDown", "LowerLipUp", "LipsAlongShaft",
+		"LowerLipRound", "MouthExtra", "JawUnits", "LipUnits", "WidenUnits", "MorphMax", "LipCloseMax", "UpperLipDown", "UpperLipClose", "LowerLipUp", "LipsAlongShaft",
 		"FollowAim", "AimRadius", "AimMaxDeg", "ThroatFrom", "ThroatFull", "ThroatShape", "ThroatBand", "ThroatFill", "ThroatRest",
 		"ThroatShapeGain", "ThroatShapeMax", "ThroatWideUnits", "ThroatWideExtra", "ThroatDetail", "ThroatMotion", "ThroatMotionLength",
 		"LipRound", "MouthWideGain", "MouthWideMax", "CornerOpen", "ThroatAxisFit", "CheekGain", "CheekMax", "CheekInner",
@@ -154,6 +154,8 @@ void Config::applyKey(const std::string& k, const std::string& v)
 		else if (k == "ThroatMotionLength") fl(throatMotionLen);
 		else if (k == "TeethOpen") bl(teethOpen);
 		else if (k == "LipCloseMax") fl(lipCloseMax);
+		else if (k == "ReadAfterPPA") bl(readAfterPpa);
+		else if (k == "UpperLipClose") fl(upperLipClose);
 		else if (k == "UpperLipDown") fl(upperLipDown);
 		else if (k == "LowerLipUp") fl(lowerLipUp);
 		else if (k == "LowerLipRound") fl(lowerLipRound);
@@ -246,9 +248,9 @@ std::vector<std::pair<std::string, std::string>> Config::keyValues(bool lookOnly
 		{ "ThroatShapeGain", f2(throatShapeGain) }, { "ThroatShapeMax", f2(throatShapeMax) }, { "ThroatWideUnits", f2(throatWideUnits) },
 		{ "ThroatWideExtra", f2(throatWideExtra) }, { "ThroatDetail", f2(throatDetail) },
 		{ "ThroatMotion", f2(throatMotion) }, { "ThroatMotionLength", f2(throatMotionLen) },
-		{ "TeethOpen", b2(teethOpen) }, { "LipCloseMax", f2(lipCloseMax) }, { "UpperLipDown", f2(upperLipDown) },
+		{ "TeethOpen", b2(teethOpen) }, { "LipCloseMax", f2(lipCloseMax) }, { "UpperLipDown", f2(upperLipDown) }, { "UpperLipClose", f2(upperLipClose) },
 		{ "LowerLipUp", f2(lowerLipUp) }, { "LowerLipRound", f2(lowerLipRound) }, { "LipsAlongShaft", b2(lipsAlongShaft) },
-		{ "FollowAim", b2(followAim) }, { "AimRadius", f2(aimRadius) }, { "AimMaxDeg", f2(aimMaxDeg) },
+		{ "ReadAfterPPA", b2(readAfterPpa) }, { "FollowAim", b2(followAim) }, { "AimRadius", f2(aimRadius) }, { "AimMaxDeg", f2(aimMaxDeg) },
 		{ "DetectShapes", b2(detectShapes) }, { "ShapeFlare", f2(shapeFlare) }, { "ShapeKnotOpen", f2(shapeKnotOpen) },
 		{ "ExtraPush", b2(extraPush) }, { "ExtraDepth", f2(extraDepth) }, { "ExtraChance", f2(extraChance) }, { "ExtraHold", f2(extraHold) }, { "ExtraSwell", f2(extraSwell) },
 		{ "SoundGulp", f2(soundGulp) }, { "SoundGag", f2(soundGag) }, { "SoundGasp", f2(soundGasp) },

@@ -364,6 +364,20 @@ namespace
 	double                               g_clock = 0.0;   // 0.4.0: seconds since the game started (for gulps / gags)
 	DeepFit::Preview                     g_preview;        // 0.4.0: the menu's test page
 	std::unordered_map<FormID, Partner>  g_partners;
+	// 0.4.5: his schlong's bones as they were at the start of this frame - last frame's final pose, after PPA bent it into
+	// the mouth (PPA does that in its own late hook, after DeepFit had read the animation's pose: a canine aimed into his
+	// mouth on screen was read 25 units off and the mouth never opened)
+	std::unordered_map<const NiAVObject*, NiTransform> g_snap;
+	bool                                               g_useSnap = false;
+	const NiTransform& wOf(const NiAVObject* o)
+	{
+		if (g_useSnap) {
+			auto it = g_snap.find(o);
+			if (it != g_snap.end())
+				return it->second;
+		}
+		return o->world;
+	}
 	float                                g_logTimer = 0.0f;
 
 	// ------------------------------------------------------------------ small helpers
@@ -511,7 +525,8 @@ namespace
 			}
 			r.profile = Heads::Find(race, mesh, fem);
 			r.specs = specsFor(r.profile);
-			if (Config::get().debugLog || r.profile >= 0)
+			static std::unordered_set<FormID> told;   // once per actor, not on every 2 s retry of a head without the bones
+			if ((r.profile >= 0 || Config::get().debugLog) && told.insert(actor->GetFormID()).second)
 				logs::info("DeepFit: {:08X} race {} head {} - {}", actor->GetFormID(), race, mesh,
 					r.profile >= 0 ? "head profile \"" + Heads::All()[r.profile].name + "\"" : std::string("DeepFit's own bones"));
 		}
@@ -702,8 +717,8 @@ namespace
 					const std::uint32_t b = sv.bone[kb];
 					if (b >= nb || !si->bones[b])
 						continue;
-					const NiPoint3 q = (si->bones[b]->world * sd->boneData[b].skinToBone) * sv.skinPos;
-					dd.push_back(len(q - si->bones[b]->world.translate));
+					const NiPoint3 q = (wOf(si->bones[b]) * sd->boneData[b].skinToBone) * sv.skinPos;
+					dd.push_back(len(q - wOf(si->bones[b]).translate));
 				}
 				if (dd.empty())
 					return 1e9f;
@@ -763,7 +778,7 @@ namespace
 	{
 		std::vector<NiPoint3> b;
 		for (auto& n : p.chain)
-			if (n) b.push_back(n->world.translate);
+			if (n) b.push_back(wOf(n.get()).translate);
 		if (b.size() < 2)
 			return;
 		const NiPoint3 last = b.back() - b[b.size() - 2];
@@ -844,7 +859,7 @@ namespace
 				auto* b = si->bones[i];
 				if (!b)
 					continue;
-				xf[i] = b->world * sd->boneData[i].skinToBone;
+				xf[i] = wOf(b) * sd->boneData[i].skinToBone;
 				ok[i] = true;
 			}
 			for (auto& sv : shape.verts) {
@@ -870,7 +885,7 @@ namespace
 			for (std::size_t i = 0; i < p.world.size(); i += step) {
 				float best = 1e9f;
 				for (std::size_t k = 0; k + 1 < p.chain.size(); ++k) {
-					const NiPoint3 a = p.chain[k]->world.translate, b = p.chain[k + 1]->world.translate, ab = b - a;
+					const NiPoint3 a = wOf(p.chain[k].get()).translate, b = wOf(p.chain[k + 1].get()).translate, ab = b - a;
 					const float    l2 = dot(ab, ab);
 					const float    t = l2 > 1e-6f ? std::clamp(dot(p.world[i] - a, ab) / l2, 0.0f, 1.0f) : 0.0f;
 					best = std::min(best, len(p.world[i] - (a + ab * t)));
@@ -1392,16 +1407,29 @@ namespace
 				float    sRest = rh.x * d.x + rh.z * d.z;
 				float    sMax = -1e9f;
 				const float mxLip = spec.kind == Kind::Corner ? cfg.cornerMax : (r.dir(i).z > 0 ? cfg.upperLipMax : cfg.lowerLipMax);
-				for (auto& p : hs) {
-					if (std::fabs(p.y - rh.y) > cfg.lipDepthSlab)
-						continue;
-					if (std::fabs(p.x * e.x + p.z * e.z) > cfg.lipLaneWidth)
-						continue;
-					float s = p.x * d.x + p.z * d.z;
-					if (s - sRest > mxLip * 2.0f + 1.0f)
-						continue;   // 0.1.4: far past what this lip can reach (the shaft's base, the balls) - not round the lip
-					if (s > sMax)
-						sMax = s;
+				// 0.4.5: a low-poly shaft (a werewolf's, ~200 vertices) has rings further apart than the slab: the lip's
+				// highest point then jumped from ring to ring as it slid and the upper lip jittered. Few points found = look
+				// wider (and the lips ease more slowly below)
+				int hits = 0;
+				auto scan = [&](float slab, float lane) {
+					for (auto& p : hs) {
+						if (std::fabs(p.y - rh.y) > slab)
+							continue;
+						if (std::fabs(p.x * e.x + p.z * e.z) > lane)
+							continue;
+						float s = p.x * d.x + p.z * d.z;
+						if (s - sRest > mxLip * 2.0f + 1.0f)
+							continue;   // 0.1.4: far past what this lip can reach (the shaft's base, the balls) - not round the lip
+						++hits;
+						if (s > sMax)
+							sMax = s;
+					}
+				};
+				scan(cfg.lipDepthSlab, cfg.lipLaneWidth);
+				if (hits < 3) {
+					hits = 0;
+					sMax = -1e9f;
+					scan(cfg.lipDepthSlab * 2.5f, cfg.lipLaneWidth * 2.0f);
 				}
 				float mx = mxLip;
 				if (DeepFit::MouthNow()) {   // 0.2.0: the morphs opened the mouth; the bones fit the lips to the shaft (out, or back in round a slim one)
@@ -1409,6 +1437,10 @@ namespace
 					// his upper lip 5 units in)
 					target[i] = sMax > -1e8f ? std::clamp(sMax + cfg.lipMargin + cfg.stretch - sRest - comp[i], (DeepFit::MegaMouthNow() || !inMouth) ? 0.0f : -cfg.lipCloseMax, mx) : 0.0f;
 					// 0.3.3: the lip-round morph peaks the middle of the upper lip up towards the nose - pull it back down
+					// 0.4.5: the upper lip down onto a shaft that sits lower than it (the thin front of the shaft rides low in his
+					// mouth on a shallow stroke) - harder, as its bones are only half weighted
+					if (spec.kind == Kind::Lip && r.dir(i).z > 0.0f && inMouth && target[i] < 0.0f && cfg.upperLipClose != 1.0f)
+						target[i] *= cfg.upperLipClose;
 					if (spec.kind == Kind::Lip && r.dir(i).z > 0.0f && inMouth && cfg.upperLipDown > 0.0f)
 						target[i] -= cfg.upperLipDown * (i == kUpperCenter ? 1.0f : 0.6f);
 					// 0.4.1: and the lower lip up (the jaw morph drops it further than the shaft needs)
@@ -1452,12 +1484,14 @@ namespace
 
 		// smooth + apply
 		const float k = 1.0f - std::exp(-delta * cfg.smoothSpeed);
+		// 0.4.5: a low-poly shaft: the lips ease more slowly (its few vertices step from frame to frame)
+		const float kLip = hs.size() < 600 ? 1.0f - std::exp(-delta * cfg.smoothSpeed * 0.4f) : k;
 		r.drag += (r.dragWant - r.drag) * (1.0f - std::exp(-delta * 8.0f));
 		for (int i = 0; i < r.nspecs(); ++i) {
 			auto& b = r.bones[i];
 			if (!b.valid)
 				continue;
-			b.cur += (target[i] - b.cur) * k;
+			b.cur += (target[i] - b.cur) * ((r.specs[i].kind == Kind::Lip || r.specs[i].kind == Kind::Corner) ? kLip : k);
 			if (std::fabs(b.cur) < 1e-4f)
 				b.cur = 0.0f;
 			NiPoint3 d = norm(r.dir(i));
@@ -1696,6 +1730,8 @@ namespace
 	{
 		float want[8] = {}, base[8] = {}, sent[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
 		bool  on = false, wanted = false;
+		int   ph = -1;                                // 0.4.5: his jaw opened with a phoneme (a head without DeepFit's morphs)
+		float phWant = 0.0f, phBase = 0.0f, phSent = -1.0f;
 	};
 	std::mutex                              g_faceLock;
 	std::unordered_map<FormID, FaceState>   g_face;
@@ -1716,6 +1752,21 @@ namespace
 		}
 		std::copy(std::begin(fw.want), std::end(fw.want), it->second.want);
 		it->second.wanted = any;
+	}
+
+	// 0.4.5: his jaw by a phoneme (0-1), for a head whose profile names one (its own morphs are not there)
+	void setJawWant(FormID id, int ph, float v)
+	{
+		std::lock_guard lk(g_faceLock);
+		auto it = g_face.find(id);
+		if (it == g_face.end()) {
+			if (v <= 0.005f)
+				return;
+			it = g_face.emplace(id, FaceState{}).first;
+			g_faceN = static_cast<int>(g_face.size());
+		}
+		it->second.ph = ph;
+		it->second.phWant = v;
 	}
 
 	// right after the game poses him: over whatever OStim's expression / the blinking set (never below it)
@@ -1742,7 +1793,17 @@ namespace
 			fg->modifierKeyFrame.SetValue(i, out);
 			f.sent[i] = out;
 		}
-		f.on = f.wanted;
+		if (f.ph >= 0 && fg->phenomeKeyFrame.values && static_cast<std::uint32_t>(f.ph) < fg->phenomeKeyFrame.count) {
+			const float cur = fg->phenomeKeyFrame.values[f.ph];
+			if (std::fabs(cur - f.phSent) > 1e-3f)
+				f.phBase = cur;   // the lip sync / OStim's expression set it since
+			const float out = std::max(f.phBase, f.phWant);
+			fg->phenomeKeyFrame.SetValue(f.ph, out);
+			f.phSent = out;
+			if (f.phWant <= 0.005f)
+				f.ph = -1;   // given back
+		}
+		f.on = f.wanted || f.ph >= 0;
 		if (!f.on) {   // given back: forget him
 			g_face.erase(it);
 			g_faceN = static_cast<int>(g_face.size());
@@ -1759,6 +1820,11 @@ namespace
 		auto act = r.actor.get();
 		if (!act)
 			return;
+		{   // 0.4.5: a head profile that opens the jaw with a phoneme (no DeepFit morphs in that head)
+			auto& hs = Heads::All();
+			if (r.profile >= 0 && r.profile < static_cast<int>(hs.size()) && hs[r.profile].jawPhoneme >= 0)
+				setJawWant(act->GetFormID(), hs[r.profile].jawPhoneme, std::clamp(r.morph[0] / 100.0f, 0.0f, 1.0f));
+		}
 		if (auto* fg = act->GetFaceGenAnimationData(); fg && cfg.teethOpen && (r.teeth || r.teethSent)) {   // 0.2.1: only while in use, and once to close
 			fg->modifierKeyFrame.SetValue(12, r.teeth ? 1.0f : 0.0f);
 			r.teethSent = r.teeth;
@@ -2164,22 +2230,32 @@ namespace
 	{
 		if (!cfg.followAim || p.chain.size() < 2 || !p.chain.front() || !p.chain.back())
 			return;
-		const NiPoint3 B = p.chain.front()->world.translate, T = p.chain.back()->world.translate;
+		// 0.4.5: why it was not turned (debug log, once a second) - a canine read 25 units off his lips was never aimed
+		static double toldAt = -1e9;
+		auto why = [&](const char* r, float a, float b) {
+			if (cfg.debugLog && g_clock - toldAt > 1.0) {
+				toldAt = g_clock;
+				logs::info("DeepFit: not aimed at his lips - {} ({:.1f} / {:.1f})", r, a, b);
+			}
+		};
+		const NiPoint3 B = wOf(p.chain.front().get()).translate, T = wOf(p.chain.back().get()).translate;
 		const NiPoint3 d = T - B, v = C - B;
 		const float    L = len(d), lv = len(v);
 		if (L < 1.0f || lv < 1.0f || lv > L * 1.8f + 4.0f)
-			return;
+			return why("his lips are too far from the base of his schlong (distance / its length)", lv, L);
 		const float t = dot(v, d) / (L * L);
 		if (t < 0.3f)
-			return;
+			return why("his lips are behind or beside the base of his schlong (share along it)", t, 0.3f);
 		const NiPoint3 perpV = v - d * t;
 		if (len(perpV) > cfg.aimRadius)
-			return;
+			return why("its line passes too far from his lips (units / \"Aim when it passes within\")", len(perpV), cfg.aimRadius);
 		const NiPoint3 a = norm(d), b = norm(v);
 		NiPoint3       ax(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x);
 		const float    s = len(ax), c = dot(a, b);
 		const float    ang = std::atan2(s, c);
-		if (s < 1e-5f || ang < 0.003f || ang > cfg.aimMaxDeg * 0.01745329f)
+		if (ang > cfg.aimMaxDeg * 0.01745329f)
+			return why("it would have to turn too far (degrees / \"Turn it at most\")", ang * 57.29578f, cfg.aimMaxDeg);
+		if (s < 1e-5f || ang < 0.003f)
 			return;
 		ax = ax * (1.0f / s);
 		const float cs = std::cos(ang), sn = std::sin(ang);
@@ -2313,6 +2389,33 @@ namespace
 	// 0.1.2: driven from the input-event queue (sent every frame) through the SKSE task queue,
 	// the way OStrands does it. PlayerCharacter::Update is not called while OStim has the player
 	// in a scene (0.1.1 logged nothing from a scene's start to its end), so the mouth never moved.
+	// 0.4.5: called at the start of every frame (input), before the game animates anyone: every bone a partner's shaft is
+	// read from, as last frame ended (with PPA's aim)
+	void snapPartners()
+	{
+		g_snap.clear();
+		g_useSnap = Config::get().readAfterPpa;
+		if (!g_useSnap)
+			return;
+		for (auto& [id, p] : g_partners) {
+			for (auto& c : p.chain)
+				if (c)
+					g_snap[c.get()] = c->world;
+			for (auto& sh : p.shapes) {
+				auto* geom = sh.geom.get();
+				if (!geom)
+					continue;
+				auto* si = geom->GetGeometryRuntimeData().skinInstance.get();
+				if (!si || !si->skinData || !si->bones)
+					continue;
+				const std::uint32_t nb = si->skinData->bones;
+				for (std::uint32_t i = 0; i < nb; ++i)
+					if (auto* b = si->bones[i])
+						g_snap[b] = b->world;
+			}
+		}
+	}
+
 	class FrameDriver : public BSTEventSink<InputEvent*>
 	{
 	public:
@@ -2362,6 +2465,7 @@ namespace
 			}
 			if (_queued.exchange(true))
 				return BSEventNotifyControl::kContinue;
+			snapPartners();   // 0.4.5: before the animation update (the task below runs after it)
 			if (auto* t = SKSE::GetTaskInterface()) {
 				t->AddTask([this]() {
 					_queued = false;
@@ -2457,6 +2561,23 @@ void DeepFit::OnFrame(float delta)
 	if (g_reloadHeads.exchange(false)) {   // 0.4.6: the menu's "Reload head files" (here, so no head is mid-fit)
 		Heads::Load();
 		logs::info("DeepFit: head profiles reloaded ({})", Heads::All().size());
+	}
+	{   // 0.4.5: how far PPA moved each partner's schlong tip from the animation's pose (debug log, every 2 s)
+		static double toldPpa = -1e9;
+		if (Config::get().debugLog && g_useSnap && g_clock - toldPpa > 2.0) {
+			for (auto& [id, p] : g_partners) {
+				if (p.chain.empty() || !p.chain.back())
+					continue;
+				auto it = g_snap.find(p.chain.back().get());
+				if (it == g_snap.end())
+					continue;
+				const float moved = len(it->second.translate - p.chain.back()->world.translate);
+				if (moved > 0.5f) {
+					toldPpa = g_clock;
+					logs::info("DeepFit: {:08X}'s schlong tip is {:.1f} units from where the animation has it (PPA's aim) - read where PPA put it", id, moved);
+				}
+			}
+		}
 	}
 	auto& cfg = Config::get();
 	if (!cfg.enabled)
