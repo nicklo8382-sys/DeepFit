@@ -98,6 +98,7 @@ struct Config
 	float aimMaxDeg = 45.0f;       // ... turned at most this far
 	float upperLipClose = 1.0f;    // 0.4.5: the upper lip comes down onto a shaft lower than it this many times harder (its bones are
 	                               // only half weighted, so a 2-unit move shows as 1)
+	float upperJawDown = 0.0f;     // 0.4.7: a beast's upper snout tilted down onto the shaft (0-1 of its DF_UpperJawDown; 1 = 10 degrees)
 	float upperLipDown = 0.6f;     // 0.3.3: the upper lip pulled down this far while the mouth is full (the lip morph peaks it up to the nose)
 	float noseFollow = 0.5f;       // nose base rises by this fraction of the upper-lip-center push
 	float noseMax = 0.5f;

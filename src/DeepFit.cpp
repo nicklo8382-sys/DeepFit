@@ -119,7 +119,8 @@ namespace
 	constexpr int         kRidge0 = kMouthWide + 1;        // 0.4.0: DF_ThroatRidge1-10 - a ridged schlong's ridge down the middle
 	constexpr int         kKnob0 = kRidge0 + kBands;       // 0.4.0: DF_ThroatKnob1-10 - a segmented one's knobs, one each side
 	constexpr int         kLowerRound = kKnob0 + kBands;   // 0.4.4: DF_LowerLipRound - the lower lip's sides out and down (a round opening)
-	constexpr int         kMorphs = kLowerRound + 1;
+	constexpr int         kUpperJaw = kLowerRound + 1;   // 0.4.7: DF_UpperJawDown - a beast's upper snout tilted down onto the shaft
+	constexpr int         kMorphs = kUpperJaw + 1;
 	constexpr const char* kMorphNames[kMorphs] = { "PPA_JawWide", "PPA_LipStretch", "PPA_LipWiden", "PPA_TH1", "PPA_TH2", "PPA_TH3",
 		"DF_ThroatFill1", "DF_ThroatFill2", "DF_ThroatFill3", "DF_ThroatFill4", "DF_ThroatFill5",
 		"DF_ThroatFill6", "DF_ThroatFill7", "DF_ThroatFill8", "DF_ThroatFill9", "DF_ThroatFill10",
@@ -134,7 +135,7 @@ namespace
 		"DF_ThroatRidge6", "DF_ThroatRidge7", "DF_ThroatRidge8", "DF_ThroatRidge9", "DF_ThroatRidge10",
 		"DF_ThroatKnob1", "DF_ThroatKnob2", "DF_ThroatKnob3", "DF_ThroatKnob4", "DF_ThroatKnob5",
 		"DF_ThroatKnob6", "DF_ThroatKnob7", "DF_ThroatKnob8", "DF_ThroatKnob9", "DF_ThroatKnob10",
-		"DF_LowerLipRound" };
+		"DF_LowerLipRound", "DF_UpperJawDown" };
 
 	// 0.4.4: DF_Throat / DF_ThroatWideT / DF_ThroatRidge / DF_ThroatKnob are 3 units at 100 in the head (were 1): every
 	// value DeepFit works out for them (in units x 100) is sent as a third, so a big bulge no longer hits MFEE's limit of
@@ -210,6 +211,13 @@ namespace
 	};
 
 	// 0.4.6: the settings this head uses: its head profile's, else the women's / the main set
+	// 0.4.8: how far his lower lip drops with the jaw fully open (the head profile's JawDrop; 4.1 on the human head)
+	float headJawDrop(const Receiver& r)
+	{
+		auto& h = Heads::All();
+		return (r.profile >= 0 && r.profile < static_cast<int>(h.size())) ? h[r.profile].jawDrop : 4.1f;
+	}
+
 	Config& cfgOf(const Receiver& r)
 	{
 		auto& h = Heads::All();
@@ -1044,10 +1052,7 @@ namespace
 		// 0.4.0: the test page - a made-up schlong straight into his mouth (no scene needed), with the chosen shape
 		if (preview) {
 			{   // 0.4.6: the jaw opens downward - centre it in the opening, not at the lips' middle at rest
-				float drop = 4.1f;
-				auto& heads = Heads::All();
-				if (r.profile >= 0 && r.profile < static_cast<int>(heads.size()))
-					drop = heads[r.profile].jawDrop;
+				const float drop = headJawDrop(r);
 				const float want = g_preview.autoCentre ? -0.5f * drop * std::clamp(r.morph[0] / 100.0f, 0.0f, 1.0f) : 0.0f;
 				g_previewDrop += (want - g_previewDrop) * (1.0f - std::exp(-delta * 6.0f));
 			}
@@ -1185,6 +1190,8 @@ namespace
 					want[kMouthWide] = DeepFit::MegaMouthNow() ? 100.0f * cfg.mouthWideMax : 100.0f * std::clamp(out * cfg.mouthWideGain, 0.0f, cfg.mouthWideMax);
 					// 0.4.4: the lower lip's sides rounded out as the jaw opens (a U, not a diamond pinched at its sides)
 					want[kLowerRound] = 100.0f * cfg.lowerLipRound * std::clamp(want[0] / 100.0f, 0.0f, 1.0f);
+					// 0.4.7: a snout's upper jaw comes down onto the shaft as the jaw opens (heads with DF_UpperJawDown)
+					want[kUpperJaw] = 100.0f * cfg.upperJawDown * std::clamp(want[0] / 100.0f, 0.0f, 1.0f);
 				}
 				want[2] = DeepFit::MegaMouthNow() ? cfg.morphMax : std::max(0.0f, (width + cfg.mouthExtra - restWidth) * 0.5f) / std::max(cfg.widenUnits, 0.1f) * 100.0f;
 			}
@@ -1418,12 +1425,20 @@ namespace
 			}
 			r.teeth = cfg.teethOpen && (through || inMouth);
 			// what the morphs did to each lip (their size at 100, from the SMP Head tri): the bones only make up the rest
-			const float jaw = r.morph[0] / 100.0f * cfg.jawUnits, round = r.morph[1] / 100.0f * cfg.lipUnits, widen = r.morph[2] / 100.0f * cfg.widenUnits;
+			// 0.4.8: the lower lip and the corners by how far the head's morphs really move them (measured on the head), not by
+			// JawUnits / WidenUnits - those set how wide the mouth opens (people tune them low for a wider mouth), and read as
+			// sizes they made DeepFit think the lower lip had dropped less than it had (it stayed down, short of the shaft) and
+			// the corners were further out than they were (pulled in ~2 units off the shaft's sides). The upper lip as before.
+			const float round = r.morph[1] / 100.0f * cfg.lipUnits;
+			const float j01 = std::clamp(r.morph[0] / 100.0f, 0.0f, 1.0f), r01 = std::clamp(r.morph[1] / 100.0f, 0.0f, 1.0f);
+			const float w01 = std::clamp(r.morph[2] / 100.0f, 0.0f, 1.0f), mw01 = std::clamp(r.morph[kMouthWide] / 100.0f, 0.0f, 3.0f);
+			const float drop = headJawDrop(r);   // the lower lip's drop with the jaw fully open (4.1 on the human head)
 			for (int i = 0; i < r.nspecs(); ++i) {
-				if (r.specs[i].kind == Kind::Lip)
-					comp[i] = r.dir(i).z > 0 ? round * 0.5f : jaw * 0.85f + round * 0.5f;
-				else if (r.specs[i].kind == Kind::Corner)
-					comp[i] = widen + r.morph[kMouthWide] / 100.0f;   // 0.3.8: DF_MouthWide moves each corner 1 unit at 100
+				if (r.specs[i].kind == Kind::Lip) {
+					const NiPoint3 d = norm(r.dir(i));
+					comp[i] = d.z > 0 ? round * 0.5f : j01 * drop * (i == kBottomCenter ? 1.0f : 0.87f) * std::fabs(d.z);
+				} else if (r.specs[i].kind == Kind::Corner)   // PPA_LipWiden 1.06 out, DF_MouthWide 1.0 out, the lip-round 0.87 in, the jaw 0.31 in
+					comp[i] = std::max(0.0f, 1.06f * w01 + mw01 - 0.87f * r01 - 0.31f * j01);
 			}
 			if (cfg.debugLog && g_logTimer > 1.0f) {   // 0.2.2: where the shaft is, from his mouth (right / forward / up)
 				const NiPoint3* nearest = nullptr;
@@ -1852,7 +1867,9 @@ namespace
 			const float cur = fg->phenomeKeyFrame.values[f.ph];
 			if (std::fabs(cur - f.phSent) > 1e-3f)
 				f.phBase = cur;   // the lip sync / OStim's expression set it since
-			const float out = std::max(f.phBase, f.phWant);
+			// 0.4.7: while DeepFit holds his jaw, its own value alone - the scene's expression animates the same phoneme and
+			// going over it made the jaw twitch
+			const float out = f.phWant > 0.005f ? f.phWant : f.phBase;
 			fg->phenomeKeyFrame.SetValue(f.ph, out);
 			f.phSent = out;
 			if (f.phWant <= 0.005f)
@@ -1958,6 +1975,8 @@ namespace
 					b->local.scale = 1.0f;
 					if (b->parent)
 						b->world = b->parent->world * b->local;
+					else if (r.head)
+						b->world = r.head->world;
 				}
 			r.teethBones.clear();
 			return;
@@ -1967,6 +1986,10 @@ namespace
 				b->local.scale = 0.001f;
 				if (b->parent)   // (as the mouth bones: its world set here too - the game may not update it)
 					b->world = b->parent->world * b->local;
+				else if (r.head) {   // not in the scene graph: at his head bone, shrunk
+					b->world = r.head->world;
+					b->world.scale *= 0.001f;
+				}
 			}
 		r.hideScan -= delta;
 		if (r.hideScan > 0.0f && (!r.teethHidden.empty() || !r.teethBones.empty()))
@@ -1979,9 +2002,22 @@ namespace
 		// tongue and gums stay
 		r.teethBones.clear();
 		traverse(root, [&](NiAVObject* o) {
-			if (o && !o->AsGeometry() && o->name.c_str() && std::strcmp(o->name.c_str(), "DF Teeth Only") == 0) {
-				o->local.scale = 0.001f;
-				r.teethBones.emplace_back(o);
+			if (!o)
+				return;
+			auto add = [&](NiAVObject* b) {
+				if (b && std::find_if(r.teethBones.begin(), r.teethBones.end(), [&](auto& x) { return x.get() == b; }) == r.teethBones.end()) {
+					b->local.scale = 0.001f;
+					r.teethBones.emplace_back(b);
+				}
+			};
+			if (!o->AsGeometry() && o->name.c_str() && std::strcmp(o->name.c_str(), "DF Teeth Only") == 0)
+				add(o);
+			if (auto* geo = o->AsGeometry()) {   // (and through the mouth's own skin)
+				auto* si = geo->GetGeometryRuntimeData().skinInstance.get();
+				if (si && si->bones && si->skinData)
+					for (std::uint32_t i = 0; i < si->skinData->bones; ++i)
+						if (si->bones[i] && si->bones[i]->name.c_str() && std::strcmp(si->bones[i]->name.c_str(), "DF Teeth Only") == 0)
+							add(si->bones[i]);
 			}
 		});
 		if (!r.teethBones.empty()) {
