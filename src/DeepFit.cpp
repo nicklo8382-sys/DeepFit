@@ -158,6 +158,7 @@ namespace
 		std::vector<HeadSpec> specs;              // 0.4.6: this head's bones (DeepFit's list + its head profile)
 		int                   profile = -1;       // 0.4.6: its head profile (-1 none)
 		int                   headsGen = -1;
+		double                skinCheckAt = -1e9;   // 0.4.9: when his lip bones were last checked against his face's skin
 		int                   nspecs() const { return static_cast<int>(specs.size()); }
 		ActorHandle           actor;                 // 0.2.0: whose face the morphs go on
 		float                 morph[kMorphs] = {};   // 0.2.0: eased mouth morph values (0-100)
@@ -207,6 +208,32 @@ namespace
 		bool                   shapeFromAnatomica = false;   // 0.4.4: the shape came from Anatomica (else DeepFit found it)
 		float                  knotOpen = 0.0f;
 		bool                   female = false;   // 0.4.4: a woman's head built for DeepFit - her own settings
+		// 0.5.0: his beards follow his mouth
+		struct BeardHead
+		{
+			NiPointer<BSGeometry>  geo;                 // his face mesh
+			NiTransform            bind;                // its mesh -> head bone
+			std::vector<NiPoint3>  rest;                // its vertices when looked at (mesh space)
+			std::string            tri;
+			std::vector<NiPoint3>  morph[kMorphs];      // DeepFit's morphs on it (at 100), where its .tri files have them
+			struct BW { std::int8_t spec[4]{}; float w[4]{}; int n = 0; };
+			std::vector<BW>        bw;                  // DeepFit's bones on each of its vertices
+		};
+		struct Beard
+		{
+			std::string                name, state;
+			NiPointer<BSGeometry>      geo;
+			std::uint32_t              n = 0;
+			std::vector<std::uint32_t> hv;     // the three face vertices under each beard vertex ...
+			std::vector<float>         hw;     // ... and how much each counts
+			std::vector<float>         dist;   // how far it is from the face
+			NiMatrix3                  toBeard;
+			float                      toBeardK = 1.0f;
+			bool                       culled = false;
+		};
+		BeardHead              beardHead;
+		std::vector<Beard>     beards;
+		float                  beardScan = 0.0f;
 		double                 gulpSounded = -1e9, gagSounded = -1e9, gaspSounded = -1e9;   // 0.4.4    // 0.4.2: a partner's schlong near him this frame (in a scene)   // 0.4.2: fx/fy/fz found from his mouth (until then his head bone's axes)
 	};
 
@@ -500,6 +527,25 @@ namespace
 
 	// ------------------------------------------------------------------ receiver cache
 
+	// 0.4.9: every bone a mesh of his is skinned to now. A rebuilt face can leave old copies of his lip bones hung on his
+	// skeleton - they still move with his head, but his face is no longer drawn with them: a canine scene read his mouth
+	// ~24 units off his lips (under his chin) until "Refresh my head", and the mouth never opened
+	void skinnedBones(NiAVObject* root, std::unordered_set<const NiAVObject*>& out)
+	{
+		traverse(root, [&](NiAVObject* o) {
+			auto* g = o ? o->AsGeometry() : nullptr;
+			if (!g)
+				return;
+			auto* si = g->GetGeometryRuntimeData().skinInstance.get();
+			if (!si || !si->bones || !si->skinData)
+				return;
+			const std::uint32_t nb = si->skinData->bones;
+			for (std::uint32_t i = 0; i < nb; ++i)
+				if (si->bones[i])
+					out.insert(si->bones[i]);
+		});
+	}
+
 	Receiver* getReceiver(Actor* actor, float delta)
 	{
 		auto* root = actor->Get3D(false);
@@ -513,9 +559,24 @@ namespace
 			auto& up = r.bones[kUpperCenter];
 			const bool live = r.head && r.head->parent && up.valid && up.node && up.node->parent && up.node->parent == up.parent.get() &&
 			                  len(up.node->world.translate - r.head->world.translate) < 40.0f;
-			if (live)
+			bool stale = false;
+			if (live && g_clock - r.skinCheckAt > 0.5) {   // 0.4.9: still the lip bones his face is drawn with?
+				r.skinCheckAt = g_clock;
+				std::unordered_set<const NiAVObject*> skin;
+				skinnedBones(root, skin);
+				bool anyLip = false;
+				for (auto* b : skin)
+					if (b && matchSpec(b->name.c_str(), r.specs) == kUpperCenter) {
+						anyLip = true;
+						break;
+					}
+				stale = anyLip && !skin.contains(up.node.get());
+			}
+			if (live && !stale)
 				return &r;
-			if (Config::get().debugLog)
+			if (Config::get().debugLog && stale)
+				logs::info("DeepFit: {:08X}'s face is drawn with other lip bones than DeepFit had - finding them again", actor->GetFormID());
+			else if (Config::get().debugLog)
 				logs::info("DeepFit: {:08X}'s face was rebuilt - finding the mouth bones again", actor->GetFormID());
 			r.found = 0;
 			r.checked = false;
@@ -567,19 +628,23 @@ namespace
 				logs::info("DeepFit: {:08X} race {} head {} - {}", actor->GetFormID(), race, mesh,
 					r.profile >= 0 ? "head profile \"" + Heads::All()[r.profile].name + "\"" : std::string("DeepFit's own bones"));
 		}
+		std::unordered_set<const NiAVObject*> skin;   // 0.4.9: a copy his face is skinned to beats one it is not
+		skinnedBones(root, skin);
 		traverse(root, [&](NiAVObject* o) {
 			int i = matchSpec(o->name.c_str(), r.specs);
 			if (i < 0 || !o->parent)
 				return;
 			auto& b = r.bones[i];
-			if (b.valid)
-				return;  // first match wins
+			if (b.valid) {   // first match wins - unless only this one is drawn with
+				if (skin.contains(b.node.get()) || !skin.contains(o))
+					return;
+			} else
+				++r.found;
 			b.node = NiPointer<NiAVObject>(o);
 			b.parent = NiPointer<NiNode>(o->parent);
 			b.restLocal = o->local.translate;
 			b.cur = 0.0f;
 			b.valid = true;
-			++r.found;
 		});
 		if (r.found == 0 || !r.bones[kUpperCenter].valid || !r.bones[kBottomCenter].valid) {
 			if (Config::get().debugLog && actor->IsPlayerRef())
@@ -1510,9 +1575,16 @@ namespace
 					// mouth on a shallow stroke) - harder, as its bones are only half weighted
 					if (spec.kind == Kind::Lip && r.dir(i).z > 0.0f && inMouth && target[i] < 0.0f && cfg.upperLipClose != 1.0f)
 						target[i] *= cfg.upperLipClose;
+					// 0.4.9: and the lower lip up onto it (the jaw opened wider than the shaft - a gap stayed under a canine's)
+					if (spec.kind == Kind::Lip && r.dir(i).z < 0.0f && inMouth && target[i] < 0.0f && cfg.lowerLipClose != 1.0f)
+						target[i] *= cfg.lowerLipClose;
 					// (0.4.7: below 0 lifts it instead - a cat's muzzle rises off the shaft as the jaw opens wide)
-					if (spec.kind == Kind::Lip && r.dir(i).z > 0.0f && inMouth && cfg.upperLipDown != 0.0f)
-						target[i] = std::min(target[i] - cfg.upperLipDown * (i == kUpperCenter ? 1.0f : 0.6f), mx + std::max(-cfg.upperLipDown, 0.0f));
+					// (0.4.9: a lift only while the shaft is under that lip, and as far as the jaw is open - pulling out, the lip stayed
+					// lifted with nothing under it and folded up over an Argonian's snout)
+					if (spec.kind == Kind::Lip && r.dir(i).z > 0.0f && inMouth && cfg.upperLipDown < 0.0f && sMax > -1e8f)
+						target[i] = std::min(target[i] - cfg.upperLipDown * (i == kUpperCenter ? 1.0f : 0.6f) * std::clamp(r.morph[0] / 100.0f, 0.0f, 1.0f), mx - cfg.upperLipDown);
+					else if (spec.kind == Kind::Lip && r.dir(i).z > 0.0f && inMouth && cfg.upperLipDown > 0.0f)
+						target[i] = std::min(target[i] - cfg.upperLipDown * (i == kUpperCenter ? 1.0f : 0.6f), mx);
 					// 0.4.1: and the lower lip up (the jaw morph drops it further than the shaft needs)
 					if (spec.kind == Kind::Lip && r.dir(i).z < 0.0f && inMouth && cfg.lowerLipUp > 0.0f)
 						target[i] -= cfg.lowerLipUp * (i == kBottomCenter ? 1.0f : 0.6f);
@@ -1546,6 +1618,39 @@ namespace
 				}
 				float raw = sMax > -1e8f ? (sMax - cfg.throatSkinOffset + cfg.throatMargin) : 0.0f;
 				target[i] = std::clamp(raw * cfg.throatGain, 0.0f, cfg.throatMax);
+			}
+		}
+		// 0.4.9: each lip's bones smoothed against their neighbours along it - a snout has more lip bones than a man's mouth,
+		// and one pushed further than the next made a spike at the side of the mouth (Argonian, Khajiit)
+		if (cfg.lipSmooth > 0.0f) {
+			for (int upper = 0; upper < 2; ++upper) {
+				int   idx[kMaxSpecs];
+				float xs[kMaxSpecs];
+				int   n = 0;
+				for (int i = 0; i < r.nspecs(); ++i) {
+					if (!r.bones[i].valid || r.specs[i].kind != Kind::Lip || (r.dir(i).z > 0.0f) != (upper == 1))
+						continue;
+					idx[n] = i;
+					xs[n] = dot(rest[i] - C, X);
+					++n;
+				}
+				for (int a = 1; a < n; ++a)   // along the lip, left to right
+					for (int b = a; b > 0 && xs[b] < xs[b - 1]; --b) {
+						std::swap(xs[b], xs[b - 1]);
+						std::swap(idx[b], idx[b - 1]);
+					}
+				if (n < 4)   // (people's lips - three bones each - left as they were)
+					continue;
+				float sm[kMaxSpecs];
+				for (int pass = 0; pass < 2; ++pass) {
+					for (int k = 0; k < n; ++k) {
+						const float t = target[idx[k]];
+						const float l = target[idx[k > 0 ? k - 1 : k]], rr = target[idx[k < n - 1 ? k + 1 : k]];
+						sm[k] = t + ((l + rr) * 0.5f - t) * 0.5f * cfg.lipSmooth;
+					}
+					for (int k = 0; k < n; ++k)
+						target[idx[k]] = sm[k];
+				}
 			}
 		}
 		// nose base follows the upper lip centre
@@ -2367,6 +2472,615 @@ namespace
 		h->Update(ud);
 	}
 
+	// ------------------------------------------------------------------ 0.5.0: beards follow the mouth
+	// A beard is its own mesh, hung on the head bone only: it did not move with the lips DeepFit moves or the jaw it opens.
+	// Each beard vertex is matched (once) to the nearest few points of the face under it, and every frame it is moved as
+	// far as those face points are moved by DeepFit - its morphs (read from the same MFEE extension .tri files MFEE uses)
+	// and its lip / jaw bones. Only DeepFit's own movement: the beard's own expressions and lip sync play as before.
+	// A beard the game animates is a BSDynamicTriShape (its vertices on the CPU); a static beard (BSTriShape, no
+	// expressions of its own) cannot be moved this way and is left alone (the menu says so).
+
+	struct TriMorphs
+	{
+		std::uint32_t                                            nv = 0;
+		std::unordered_map<std::string, std::vector<NiPoint3>>   d;   // DeepFit's morphs only: name -> delta per vertex at 100
+	};
+
+	std::string lowerPath(std::string s)
+	{
+		for (auto& c : s) {
+			c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+			if (c == '/')
+				c = '\\';
+		}
+		while (!s.empty() && (s.front() == ' ' || s.front() == '\t'))
+			s.erase(s.begin());
+		while (!s.empty() && (s.back() == ' ' || s.back() == '\t' || s.back() == '\r'))
+			s.pop_back();
+		if (s.rfind("meshes\\", 0) == 0)
+			s = s.substr(7);
+		return s;
+	}
+
+	// a .tri file (FRTRI003): its morphs that DeepFit drives
+	std::shared_ptr<TriMorphs> loadTri(const std::string& rel)
+	{
+		static std::unordered_map<std::string, std::shared_ptr<TriMorphs>> cache;
+		const std::string key = lowerPath(rel);
+		if (auto it = cache.find(key); it != cache.end())
+			return it->second;
+		auto& out = cache[key];
+		std::ifstream in("Data\\meshes\\" + key, std::ios::binary);
+		if (!in)
+			return out;
+		std::vector<char> b((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+		auto i32 = [&](std::size_t o) { std::int32_t v = 0; if (o + 4 <= b.size()) std::memcpy(&v, b.data() + o, 4); return v; };
+		if (b.size() < 64 || std::memcmp(b.data(), "FRTRI003", 8) != 0)
+			return out;
+		const std::int32_t nv = i32(8), nt = i32(12), nuv = i32(28), fl = i32(32), nm = i32(36), nmv = i32(44);
+		if (nv <= 0 || nv > 200000 || nm < 0 || nm > 4000)
+			return out;
+		std::size_t o = 64 + static_cast<std::size_t>(nv) * 12 + static_cast<std::size_t>(std::max(nmv, 0)) * 12 + static_cast<std::size_t>(std::max(nt, 0)) * 12;
+		if (fl & 1)
+			o += static_cast<std::size_t>(std::max(nuv, 0)) * 8 + static_cast<std::size_t>(std::max(nt, 0)) * 12;
+		static const std::unordered_set<std::string> ours = [] {
+			std::unordered_set<std::string> s;
+			for (auto* n : kMorphNames)
+				s.insert(n);
+			return s;
+		}();
+		auto t = std::make_shared<TriMorphs>();
+		t->nv = static_cast<std::uint32_t>(nv);
+		for (std::int32_t m = 0; m < nm; ++m) {
+			const std::int32_t l = i32(o);
+			if (l <= 0 || l > 512 || o + 4 + l + 4 + static_cast<std::size_t>(nv) * 6 > b.size())
+				break;
+			std::string name(b.data() + o + 4, b.data() + o + 4 + l);
+			while (!name.empty() && name.back() == '\0')
+				name.pop_back();
+			o += 4 + l;
+			float k = 0.0f;
+			std::memcpy(&k, b.data() + o, 4);
+			o += 4;
+			if (ours.contains(name)) {
+				auto& v = t->d[name];
+				v.resize(nv);
+				for (std::int32_t j = 0; j < nv; ++j) {
+					std::int16_t s[3];
+					std::memcpy(s, b.data() + o + static_cast<std::size_t>(j) * 6, 6);
+					v[j] = NiPoint3(s[0] * k, s[1] * k, s[2] * k);
+				}
+			}
+			o += static_cast<std::size_t>(nv) * 6;
+		}
+		out = t;
+		return out;
+	}
+
+	// MFEE's ExtensionFile lines: a head's own .tri -> the .tri files that add morphs to it
+	const std::unordered_map<std::string, std::vector<std::string>>& mfeeExtensions()
+	{
+		static std::unordered_map<std::string, std::vector<std::string>> map;
+		static bool                                                     read = false;
+		if (read)
+			return map;
+		read = true;
+		std::error_code ec;
+		for (auto& e : std::filesystem::directory_iterator("Data\\SKSE\\Plugins\\MuFacialExpressionExtended", ec)) {
+			if (!e.is_regular_file(ec) || e.path().extension() != ".ini")
+				continue;
+			std::ifstream in(e.path());
+			std::string   line;
+			while (std::getline(in, line)) {
+				const auto eq = line.find('=');
+				if (eq == std::string::npos || lowerPath(line.substr(0, eq)) != "extensionfile")
+					continue;
+				const std::string rest = line.substr(eq + 1);
+				const auto        comma = rest.find(',');
+				if (comma == std::string::npos)
+					continue;
+				map[lowerPath(rest.substr(0, comma))].push_back(lowerPath(rest.substr(comma + 1)));
+			}
+		}
+		return map;
+	}
+
+	// a mesh's point in his head bone's space, and its rotation / scale there (both meshes are skinned to that bone)
+	bool headBind(BSGeometry* g, NiTransform& out)
+	{
+		auto* si = g ? g->GetGeometryRuntimeData().skinInstance.get() : nullptr;
+		if (!si || !si->skinData || !si->bones || !si->skinData->boneData)
+			return false;
+		const std::uint32_t nb = si->skinData->bones;
+		for (std::uint32_t i = 0; i < nb; ++i)
+			if (si->bones[i] && si->bones[i]->name == "NPC Head [Head]") {
+				out = si->skinData->boneData[i].skinToBone;
+				return true;
+			}
+		return false;
+	}
+
+	// a dynamic mesh's vertices as they are now (its CPU copy)
+	bool dynVerts(BSGeometry* g, std::vector<NiPoint3>& out)
+	{
+		auto* d = g ? g->AsDynamicTriShape() : nullptr;
+		if (!d)
+			return false;
+		auto& rd = d->GetDynamicTrishapeRuntimeData();
+		if (!rd.dynamicData || rd.dataSize < 16)
+			return false;
+		BSSpinLockGuard lk(rd.lock);
+		const std::uint32_t n = rd.dataSize / 16;
+		const float*        v = static_cast<const float*>(rd.dynamicData);
+		out.resize(n);
+		for (std::uint32_t i = 0; i < n; ++i)
+			out[i] = NiPoint3(v[i * 4], v[i * 4 + 1], v[i * 4 + 2]);
+		return true;
+	}
+
+	struct BeardWrite   // what the facegen hook writes into one beard, after the game has updated its face
+	{
+		NiPointer<BSGeometry>  geo;
+		std::vector<NiPoint3>  want;          // DeepFit's move of each vertex (its own mesh space)
+		std::vector<NiPoint3>  lastGame, lastWritten;
+		bool                   active = false, applied = false;
+		std::uint32_t          writes = 0, rewrites = 0;
+	};
+	std::mutex                                                     g_beardLock;
+	std::unordered_map<const NiAVObject*, std::vector<BeardWrite>> g_beardW;   // by his BSFaceGenNiNode
+
+	void writeBeard(BeardWrite& w)
+	{
+		if (!w.active && !w.applied)
+			return;
+		auto* d = w.geo ? w.geo->AsDynamicTriShape() : nullptr;
+		if (!d)
+			return;
+		auto& rd = d->GetDynamicTrishapeRuntimeData();
+		if (!rd.dynamicData)
+			return;
+		BSSpinLockGuard lk(rd.lock);
+		const std::uint32_t n = std::min<std::uint32_t>(rd.dataSize / 16, static_cast<std::uint32_t>(w.want.size()));
+		float*              v = static_cast<float*>(rd.dynamicData);
+		if (w.lastGame.size() < n) {
+			w.lastGame.resize(n);
+			w.lastWritten.resize(n);
+		}
+		bool rewritten = false;
+		for (std::uint32_t i = 0; i < n; ++i) {
+			const NiPoint3 cur(v[i * 4], v[i * 4 + 1], v[i * 4 + 2]);
+			const NiPoint3& lw = w.lastWritten[i];
+			const bool      ours = w.applied && cur.x == lw.x && cur.y == lw.y && cur.z == lw.z;
+			if (w.applied && !ours)
+				rewritten = true;
+			const NiPoint3 game = ours ? w.lastGame[i] : cur;   // the game has put its own value there since (an expression)
+			const NiPoint3 out = w.active ? game + w.want[i] : game;
+			v[i * 4] = out.x;
+			v[i * 4 + 1] = out.y;
+			v[i * 4 + 2] = out.z;
+			w.lastGame[i] = game;
+			w.lastWritten[i] = out;
+		}
+		++w.writes;
+		if (rewritten)
+			++w.rewrites;
+		w.applied = w.active;
+	}
+
+	struct FaceGenHook
+	{
+		static void Update(BSFaceGenNiNode* a_node, NiUpdateData& a_data, std::uint32_t a_arg2)
+		{
+			g_orig(a_node, a_data, a_arg2);   // the game's own morphs first (expressions, MFEE)
+			if (g_beardN.load(std::memory_order_relaxed) == 0)
+				return;
+			std::lock_guard lk(g_beardLock);
+			auto it = g_beardW.find(a_node);
+			if (it == g_beardW.end())
+				return;
+			for (auto& w : it->second)
+				writeBeard(w);
+		}
+		static inline REL::Relocation<decltype(Update)> g_orig;
+		static inline std::atomic<int>                  g_beardN{ 0 };
+		static void Install()
+		{
+			REL::Relocation<std::uintptr_t> vt{ RE::VTABLE_BSFaceGenNiNode[0] };
+			g_orig = vt.write_vfunc(0x2C, Update);
+			logs::info("DeepFit: hooked the face's update (beards follow the mouth)");
+		}
+	};
+
+	// the face mesh his lips are on, and its DeepFit morphs / bone weights - read once per face
+	bool readHeadForBeards(Receiver& r, Actor* act, NiAVObject* root)
+	{
+		auto& hb = r.beardHead;
+		hb = Receiver::BeardHead{};
+		auto* base = act->GetActorBase();
+		auto* hp = base ? base->GetCurrentHeadPartByType(BGSHeadPart::HeadPartType::kFace) : nullptr;
+		if (!hp)
+			return false;
+		auto* o = root->GetObjectByName(hp->formEditorID);
+		auto* g = o ? o->AsGeometry() : nullptr;
+		if (!g || !headBind(g, hb.bind) || !dynVerts(g, hb.rest))
+			return false;
+		hb.geo = NiPointer<BSGeometry>(g);
+		const char* tri = hp->morphs[BGSHeadPart::MorphIndex::kRaceMorph].GetModel();
+		hb.tri = tri ? tri : "";
+		if (tri && *tri) {
+			auto& ext = mfeeExtensions();
+			std::vector<std::string> files{ lowerPath(tri) };
+			if (auto it = ext.find(lowerPath(tri)); it != ext.end())
+				files.insert(files.end(), it->second.begin(), it->second.end());
+			for (auto& f : files) {
+				auto t = loadTri(f);
+				if (!t || t->nv != hb.rest.size())
+					continue;
+				for (int m = 0; m < kMorphs; ++m)
+					if (auto mi = t->d.find(kMorphNames[m]); mi != t->d.end() && hb.morph[m].empty())
+						hb.morph[m] = mi->second;
+			}
+		}
+		// his DeepFit bones' weights on each face vertex (the skin's vertex data; bones numbered over the whole mesh or
+		// within each partition - whichever puts the vertices on their own bones)
+		auto* si = g->GetGeometryRuntimeData().skinInstance.get();
+		auto* sd = si ? si->skinData.get() : nullptr;
+		auto* sp = si ? si->skinPartition.get() : nullptr;
+		if (!sd || !sp || sp->numPartitions == 0 || !si->bones || !sd->boneData)
+			return true;
+		const std::uint32_t nb = sd->bones;
+		std::vector<int>    specOf(nb, -1);
+		for (std::uint32_t b = 0; b < nb; ++b)
+			for (int i = 0; i < r.nspecs(); ++i)
+				if (r.bones[i].valid && si->bones[b] == r.bones[i].node.get())
+					specOf[b] = i;
+		auto& part = sp->partitions[0];
+		if (!part.buffData || !part.buffData->rawVertexData || !(part.vertexDesc.GetFlags() & BSGraphics::Vertex::VF_SKINNED))
+			return true;
+		const std::uint32_t vSize = part.vertexDesc.GetSize();
+		const std::uint32_t skinOff = part.vertexDesc.GetAttributeOffset(BSGraphics::Vertex::VA_SKINNING);
+		const std::uint32_t nv = std::min<std::uint32_t>(sp->vertexCount, static_cast<std::uint32_t>(hb.rest.size()));
+		std::vector<std::int16_t> partOf;
+		if (sp->numPartitions > 1) {
+			partOf.assign(sp->vertexCount, -1);
+			for (std::uint32_t pi = 0; pi < sp->numPartitions; ++pi) {
+				auto&                pp = sp->partitions[pi];
+				const std::uint16_t* idx = (pp.buffData && pp.buffData->rawIndexData) ? pp.buffData->rawIndexData : pp.triList;
+				if (!idx)
+					continue;
+				for (std::uint32_t t = 0; t < static_cast<std::uint32_t>(pp.triangles) * 3u; ++t)
+					if (idx[t] < sp->vertexCount && partOf[idx[t]] < 0)
+						partOf[idx[t]] = static_cast<std::int16_t>(pi);
+			}
+		}
+		auto boneOf = [&](std::uint32_t j, std::uint8_t raw, bool local) -> std::uint32_t {
+			if (local && !partOf.empty() && partOf[j] >= 0) {
+				auto& pp = sp->partitions[partOf[j]];
+				return (pp.bones && raw < pp.numBones) ? pp.bones[raw] : 0xFFFFu;
+			}
+			return raw;
+		};
+		// which numbering: the median distance from each vertex to its main bone's rest place (mesh space)
+		auto offBones = [&](bool local) {
+			std::vector<float> dd;
+			for (std::uint32_t j = 0; j < nv; j += std::max<std::uint32_t>(1, nv / 200)) {
+				const std::uint8_t*  v = part.buffData->rawVertexData + static_cast<std::size_t>(j) * vSize;
+				const std::uint16_t* hw = reinterpret_cast<const std::uint16_t*>(v + skinOff);
+				const std::uint8_t*  bi = reinterpret_cast<const std::uint8_t*>(hw + 4);
+				int                  kb = 0;
+				for (int k = 1; k < 4; ++k)
+					if (half2float(hw[k]) > half2float(hw[kb])) kb = k;
+				const std::uint32_t b = boneOf(j, bi[kb], local);
+				if (b >= nb)
+					continue;
+				const NiTransform inv = sd->boneData[b].skinToBone.Invert();
+				dd.push_back(len(hb.rest[j] - inv.translate));
+			}
+			if (dd.empty())
+				return 1e9f;
+			std::nth_element(dd.begin(), dd.begin() + dd.size() / 2, dd.end());
+			return dd[dd.size() / 2];
+		};
+		const bool local = !partOf.empty() && offBones(true) < offBones(false) * 0.7f;
+		hb.bw.assign(nv, {});
+		int weighted = 0;
+		for (std::uint32_t j = 0; j < nv; ++j) {
+			const std::uint8_t*  v = part.buffData->rawVertexData + static_cast<std::size_t>(j) * vSize;
+			const std::uint16_t* hw = reinterpret_cast<const std::uint16_t*>(v + skinOff);
+			const std::uint8_t*  bi = reinterpret_cast<const std::uint8_t*>(hw + 4);
+			float                tot = 0.0f;
+			for (int k = 0; k < 4; ++k)
+				tot += std::max(half2float(hw[k]), 0.0f);
+			if (tot <= 0.0f)
+				continue;
+			auto& e = hb.bw[j];
+			for (int k = 0; k < 4; ++k) {
+				const float         w = std::max(half2float(hw[k]), 0.0f) / tot;
+				const std::uint32_t b = boneOf(j, bi[k], local);
+				if (w > 0.001f && b < nb && specOf[b] >= 0) {
+					e.spec[e.n] = static_cast<std::int8_t>(specOf[b]);
+					e.w[e.n] = w;
+					++e.n;
+				}
+			}
+			if (e.n)
+				++weighted;
+		}
+		if (Config::get().debugLog)
+			logs::info("DeepFit: beards - {:08X}'s face {} ({} vertices): {} DeepFit morphs found in its .tri files ({}), {} vertices on DeepFit's bones",
+				act->GetFormID(), g->name.c_str() ? g->name.c_str() : "?", hb.rest.size(),
+				std::count_if(std::begin(hb.morph), std::end(hb.morph), [](auto& v) { return !v.empty(); }), hb.tri, weighted);
+		return true;
+	}
+
+	// his beard meshes (facial hair head parts, and their extra parts), matched to his face
+	void findBeards(Receiver& r, Actor* act, NiAVObject* root)
+	{
+		r.beards.clear();
+		auto* base = act->GetActorBase();
+		if (!base || !r.beardHead.geo)
+			return;
+		std::vector<BGSHeadPart*> parts;
+		std::function<void(BGSHeadPart*)> add = [&](BGSHeadPart* hp) {
+			if (!hp || std::find(parts.begin(), parts.end(), hp) != parts.end())
+				return;
+			parts.push_back(hp);
+			for (auto* x : hp->extraParts)
+				add(x);
+		};
+		if (base->headParts)
+			for (std::uint8_t i = 0; i < base->numHeadParts; ++i)
+				if (auto* hp = base->headParts[i]; hp && hp->type.get() == BGSHeadPart::HeadPartType::kFacialHair)
+					add(hp);
+		if (auto* hp = base->GetCurrentHeadPartByType(BGSHeadPart::HeadPartType::kFacialHair))
+			add(hp);
+		const auto&       hb = r.beardHead;
+		const NiTransform headInv = hb.bind;   // face mesh -> head bone
+		std::vector<NiPoint3> headPts(hb.rest.size());
+		for (std::size_t j = 0; j < hb.rest.size(); ++j)
+			headPts[j] = headInv * hb.rest[j];
+		for (auto* hp : parts) {
+			auto* o = root->GetObjectByName(hp->formEditorID);
+			auto* g = o ? o->AsGeometry() : nullptr;
+			Receiver::Beard b;
+			b.name = hp->formEditorID.c_str() ? hp->formEditorID.c_str() : "?";
+			if (!g) {
+				b.state = "not on him";
+				r.beards.push_back(std::move(b));
+				continue;
+			}
+			b.geo = NiPointer<BSGeometry>(g);
+			std::vector<NiPoint3> pts;
+			NiTransform           bind;
+			if (!g->AsDynamicTriShape() || !dynVerts(g, pts)) {
+				b.state = "static - it cannot move";
+				r.beards.push_back(std::move(b));
+				continue;
+			}
+			if (!headBind(g, bind)) {
+				b.state = "not on his head bone";
+				r.beards.push_back(std::move(b));
+				continue;
+			}
+			// face-mesh moves into the beard's mesh space: beard <- head bone <- face
+			const NiTransform beardInv = bind.Invert();
+			b.toBeard = beardInv.rotate * hb.bind.rotate;
+			b.toBeardK = beardInv.scale * hb.bind.scale;
+			b.n = static_cast<std::uint32_t>(pts.size());
+			b.hv.assign(b.n * 3, 0);
+			b.hw.assign(b.n * 3, 0.0f);
+			b.dist.assign(b.n, 1e9f);
+			for (std::uint32_t i = 0; i < b.n; ++i) {
+				const NiPoint3 p = bind * pts[i];
+				std::uint32_t  best[3] = { 0, 0, 0 };
+				float          bd[3] = { 1e30f, 1e30f, 1e30f };
+				for (std::uint32_t j = 0; j < headPts.size(); ++j) {
+					const NiPoint3 d = headPts[j] - p;
+					const float    q = d.x * d.x + d.y * d.y + d.z * d.z;
+					if (q >= bd[2])
+						continue;
+					int k = 2;
+					while (k > 0 && q < bd[k - 1]) {
+						bd[k] = bd[k - 1];
+						best[k] = best[k - 1];
+						--k;
+					}
+					bd[k] = q;
+					best[k] = j;
+				}
+				float tot = 0.0f, w[3];
+				for (int k = 0; k < 3; ++k) {
+					w[k] = 1.0f / (std::sqrt(bd[k]) + 0.05f);
+					tot += w[k];
+				}
+				for (int k = 0; k < 3; ++k) {
+					b.hv[i * 3 + k] = best[k];
+					b.hw[i * 3 + k] = w[k] / tot;
+				}
+				b.dist[i] = std::sqrt(bd[0]);
+			}
+			b.state = "moves with his mouth";
+			r.beards.push_back(std::move(b));
+		}
+		if (Config::get().debugLog)
+			for (auto& b : r.beards)
+				logs::info("DeepFit: beards - {:08X}'s {} ({} vertices): {}", act->GetFormID(), b.name, b.n, b.state);
+	}
+
+	void beardsFor(Receiver& r, Actor* act, float delta)
+	{
+		const auto& cfg = Config::get();
+		auto*       root = act->Get3D(false);
+		// shaved for the scene (the player only)
+		const bool shave = cfg.beardShave && act->IsPlayerRef() && r.inScene;
+		r.beardScan -= delta;
+		if (!root)
+			return;
+		if (r.beardScan <= 0.0f || (r.beardHead.geo && !r.beardHead.geo->parent)) {   // every few seconds, and when his face is rebuilt
+			r.beardScan = 4.0f;
+			auto* base = act->GetActorBase();
+			auto* fhp = base ? base->GetCurrentHeadPartByType(BGSHeadPart::HeadPartType::kFace) : nullptr;
+			auto* fo = fhp ? root->GetObjectByName(fhp->formEditorID) : nullptr;
+			if (!r.beardHead.geo || fo != r.beardHead.geo.get()) {
+				for (auto& b : r.beards)
+					if (b.geo && b.culled)
+						b.geo->SetAppCulled(false);
+				if (readHeadForBeards(r, act, root))
+					findBeards(r, act, root);
+				else
+					r.beards.clear();
+			} else {   // a beard put on or taken off?
+				std::size_t now = 0;
+				if (base && base->headParts)
+					for (std::uint8_t i = 0; i < base->numHeadParts; ++i)
+						if (auto* hp = base->headParts[i]; hp && hp->type.get() == BGSHeadPart::HeadPartType::kFacialHair)
+							++now;
+				bool gone = false;
+				for (auto& b : r.beards)
+					if (b.geo && !b.geo->parent)
+						gone = true;
+				if (gone || (now > 0) != !r.beards.empty())
+					findBeards(r, act, root);
+			}
+		}
+		for (auto& b : r.beards) {
+			if (!b.geo)
+				continue;
+			if (shave != b.culled) {
+				b.geo->SetAppCulled(shave);
+				b.culled = shave;
+			}
+		}
+		// where his face points move: DeepFit's morphs (at the values MFEE was given) and bones, in the face mesh's space
+		const auto& hb = r.beardHead;
+		const bool  follow = cfg.beardFollow && cfg.beardStrength > 0.0f && hb.geo && !shave && DeepFit::MouthNow();
+		auto*       faceNode = hb.geo ? hb.geo->parent : nullptr;
+		std::vector<std::vector<NiPoint3>> wants;
+		bool any = false;
+		if (follow) {
+			// his bones' moves (world) into the face mesh's space
+			NiPoint3 boneMove[kMaxSpecs];
+			NiMatrix3 toMesh;
+			float     toMeshK = 1.0f;
+			{
+				auto* si = hb.geo->GetGeometryRuntimeData().skinInstance.get();
+				NiTransform world;   // face mesh -> world, through his head bone
+				bool        ok = false;
+				if (si && si->bones && si->skinData)
+					for (std::uint32_t i = 0; i < si->skinData->bones; ++i)
+						if (si->bones[i] && si->bones[i]->name == "NPC Head [Head]") {
+							world = si->bones[i]->world * hb.bind;
+							ok = true;
+							break;
+						}
+				if (ok) {
+					toMesh = world.rotate.Transpose();
+					toMeshK = world.scale > 1e-6f ? 1.0f / world.scale : 1.0f;
+				}
+				for (int i = 0; i < r.nspecs(); ++i) {   // each bone's move from its rest place (world), into the face mesh's space
+					const auto& bn = r.bones[i];
+					if (!ok || !bn.valid || !bn.node || !bn.parent) {
+						boneMove[i] = NiPoint3();
+						continue;
+					}
+					const NiTransform& P = bn.parent->world;
+					const NiPoint3     offWorld = (P.rotate * (bn.node->local.translate - bn.restLocal)) * P.scale;
+					boneMove[i] = (toMesh * offWorld) * toMeshK;
+				}
+			}
+			int   onM[kMorphs];   // the morphs in use now, and how far (as MFEE was given them)
+			float mk[kMorphs];
+			int   na = 0;
+			for (int m = 0; m < kMorphs; ++m)
+				if (r.sent[m] > 0 && !hb.morph[m].empty()) {
+					onM[na] = m;
+					mk[na] = r.sent[m] / 100.0f;
+					++na;
+				}
+			const float strength = cfg.beardStrength, reach = std::max(cfg.beardReach, 0.1f);
+			for (auto& b : r.beards) {
+				std::vector<NiPoint3> want;
+				if (b.n && b.geo && b.state[0] == 'm') {
+					want.assign(b.n, NiPoint3());
+					for (std::uint32_t i = 0; i < b.n; ++i) {
+						const float fade = std::clamp(2.0f - b.dist[i] / reach, 0.0f, 1.0f);
+						if (fade <= 0.0f)
+							continue;
+						NiPoint3 d;
+						for (int k = 0; k < 3; ++k) {
+							const std::uint32_t j = b.hv[i * 3 + k];
+							const float         w = b.hw[i * 3 + k];
+							NiPoint3            dj;
+							for (int q = 0; q < na; ++q)
+								if (j < hb.morph[onM[q]].size())
+									dj += hb.morph[onM[q]][j] * mk[q];
+							if (j < hb.bw.size())
+								for (int q = 0; q < hb.bw[j].n; ++q)
+									dj += boneMove[hb.bw[j].spec[q]] * hb.bw[j].w[q];
+							d += dj * w;
+						}
+						want[i] = (b.toBeard * d) * (b.toBeardK * strength * fade);
+						if (std::fabs(want[i].x) + std::fabs(want[i].y) + std::fabs(want[i].z) > 1e-4f)
+							any = true;
+					}
+				}
+				wants.push_back(std::move(want));
+			}
+		}
+		std::lock_guard lk(g_beardLock);
+		if (!faceNode) {
+			return;
+		}
+		auto& ws = g_beardW[faceNode];
+		// one write state per beard mesh, kept across frames
+		for (std::size_t bi = 0; bi < r.beards.size(); ++bi) {
+			auto& b = r.beards[bi];
+			if (!b.geo || b.state[0] != 'm')
+				continue;
+			auto it = std::find_if(ws.begin(), ws.end(), [&](const BeardWrite& w) { return w.geo == b.geo; });
+			if (it == ws.end()) {
+				ws.emplace_back();
+				it = ws.end() - 1;
+				it->geo = b.geo;
+			}
+			const bool on = any && bi < wants.size() && !wants[bi].empty();
+			if (on)
+				it->want = std::move(wants[bi]);
+			it->active = on;
+			if (cfg.debugLog && g_logTimer > 1.0f && on && it->writes > 0)
+				logs::info("DeepFit: beards - {} moved ({} updates, the game rewrote it {} times)", b.name, it->writes, it->rewrites);
+		}
+		// beards no longer on anyone (his face rebuilt, a beard taken off) let go of
+		int n = 0;
+		for (auto it = g_beardW.begin(); it != g_beardW.end();) {
+			auto& v = it->second;
+			v.erase(std::remove_if(v.begin(), v.end(), [](const BeardWrite& w) { return !w.geo || !w.geo->parent; }), v.end());
+			if (v.empty()) {
+				it = g_beardW.erase(it);
+				continue;
+			}
+			n += static_cast<int>(v.size());
+			++it;
+		}
+		FaceGenHook::g_beardN = n;
+	}
+
+	// his beards given back as they were (his head let go of)
+	void dropBeards(Receiver& r)
+	{
+		for (auto& b : r.beards)
+			if (b.geo && b.culled) {
+				b.geo->SetAppCulled(false);
+				b.culled = false;
+			}
+		std::lock_guard lk(g_beardLock);
+		for (auto& [node, v] : g_beardW)
+			for (auto& w : v)
+				for (auto& b : r.beards)
+					if (w.geo == b.geo)
+						w.active = false;
+	}
+
 	struct AnimHook
 	{
 		static void Player(PlayerCharacter* a, float dt)
@@ -2697,6 +3411,7 @@ void DeepFit::Install()
 	if (!hooked) {
 		hooked = true;
 		AnimHook::Install();
+		FaceGenHook::Install();   // 0.5.0: beards
 	}
 	static bool done = false;
 	if (done)
@@ -2735,6 +3450,28 @@ std::string DeepFit::PlayerHeadText()
 	return s;
 }
 
+std::string DeepFit::PlayerBeardText()   // 0.5.0: the menu's Beards page
+{
+	auto* pc = RE::PlayerCharacter::GetSingleton();
+	if (!pc)
+		return {};
+	auto it = g_receivers.find(pc->GetFormID());
+	if (it == g_receivers.end() || it->second.found == 0)
+		return "Your head: not fitted by DeepFit (yet) - beards are looked at once it is.";
+	const auto& r = it->second;
+	if (!r.beardHead.geo)
+		return "Your face: not read yet.";
+	int morphs = 0;
+	for (auto& m : r.beardHead.morph)
+		morphs += m.empty() ? 0 : 1;
+	std::string s = "Your face: " + std::to_string(morphs) + " of DeepFit's morphs found in its .tri files.";
+	if (r.beards.empty())
+		return s + "\nNo beard on you.";
+	for (auto& b : r.beards)
+		s += "\n" + b.name + ": " + b.state + (b.culled ? " (shaved for the scene)" : "");
+	return s;
+}
+
 void DeepFit::OnFrame(float delta)
 {
 	if (g_refreshPlayer.exchange(false)) {   // 0.4.7: the menu's "Refresh my head" - everything DeepFit did to his old head given
@@ -2759,6 +3496,7 @@ void DeepFit::OnFrame(float delta)
 				for (auto& b : r.teethBones)
 					if (b)
 						b->local.scale = 1.0f;
+				dropBeards(r);   // 0.5.0
 				g_receivers.erase(it);
 			}
 			{
@@ -2890,6 +3628,7 @@ void DeepFit::OnFrame(float delta)
 		soundsFor(*r, recv);   // 0.4.4
 		updateTeeth(*r, recv, delta);
 		hideTeeth(*r, recv, delta);
+		beardsFor(*r, recv, delta);   // 0.5.0
 		if (recv->IsPlayerRef())
 			updateTestShaft(*r);   // 0.4.0: the test schlong, shown
 		if (r->full && main && mainP) {   // 0.4.0: what the menu shows

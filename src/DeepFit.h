@@ -35,7 +35,8 @@ namespace DeepFit
 	Preview& GetPreview();
 	void     RequestHeadReload();
 	void     RequestPlayerRefresh();  // 0.4.7: his head looked at again (after a race / head change), next frame     // 0.4.6: read the head profiles again (on the game's thread, next frame)
-	std::string PlayerHeadText();    // 0.4.6: which head profile the player's head uses, and its bones found
+	std::string PlayerHeadText();
+	std::string PlayerBeardText();   // 0.5.0: the player's beards and whether each can move    // 0.4.6: which head profile the player's head uses, and its bones found
 	std::string StatusText(std::string* a_race = nullptr, float* a_ago = nullptr);   // 0.4.0: what DeepFit last found (the menu)
 	void Install();            // frame driver (at input loaded)
 	void OnFrame(float delta);

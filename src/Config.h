@@ -98,6 +98,12 @@ struct Config
 	float aimMaxDeg = 45.0f;       // ... turned at most this far
 	float upperLipClose = 1.0f;    // 0.4.5: the upper lip comes down onto a shaft lower than it this many times harder (its bones are
 	                               // only half weighted, so a 2-unit move shows as 1)
+	bool  beardFollow = true;      // 0.5.0: beards move with the mouth (DeepFit's morphs and lip bones, from the face under them)
+	float beardStrength = 1.0f;    // 0.5.0: how much (1 = as much as the face under them)
+	float beardReach = 3.0f;       // 0.5.0: beard further than this from the face follows less (none past twice as far)
+	bool  beardShave = false;      // 0.5.0: the player's beard hidden while he is in a scene
+	float lipSmooth = 0.0f;        // 0.4.9: each lip's bones smoothed against their neighbours (0-1; snouts - no spikes at the sides)
+	float lowerLipClose = 1.0f;    // 0.4.9: the lower lip comes up onto the shaft this many times harder (a gap under a canine's shaft)
 	float upperJawDown = 0.0f;     // 0.4.7: a beast's upper snout tilted down onto the shaft (0-1 of its DF_UpperJawDown; 1 = 10 degrees)
 	float upperLipDown = 0.6f;     // 0.3.3: the upper lip pulled down this far while the mouth is full (the lip morph peaks it up to the nose)
 	float noseFollow = 0.5f;       // nose base rises by this fraction of the upper-lip-center push

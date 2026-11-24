@@ -315,8 +315,14 @@ namespace DeepFit::Menu
 			Help("A beast's whole upper snout tilts down onto the shaft as the jaw opens (1 = 10 degrees, about 1.8 units at the tip of an Argonian's). Only heads that have DeepFit's DF_UpperJawDown morph (the Argonian High Poly Head) - others ignore it.");
 			Help("On a shallow stroke the thinner front of the shaft rides low in his mouth and the upper lip has further to come down. Its bones are only half weighted in the head, so they need to move about twice as far as the lip should: raise this if the upper lip floats above the shaft (2 = about right for SMP Head). Needs \"Close in round a slim shaft\" above 0.");
 			ch |= Slider("Lower lip, at most", &c.lowerLipMax, 0.0f, 4.5f, "%.1f");
-			ch |= Slider("Lower lip up", &c.lowerLipUp, 0.0f, 1.2f, "%.2f");
+			ch |= Slider("Lower lip up", &c.lowerLipUp, 0.0f, 3.0f, "%.2f");
 			Help("While the mouth is full the lower lip is pushed up this far (its middle fully, the sides a little less), closer round the shaft.");
+			ch |= Slider("Lips follow speed", &c.smoothSpeed, 4.0f, 40.0f, "%.0f");
+			Help("How fast the lips and jaw bones catch up with the shaft (per second). Lower is smoother on a shaft that is thicker in some places than others (a snout's lips jerked from one size to the next); higher sticks closer. Each head keeps its own.");
+			ch |= Slider("Smooth the lips", &c.lipSmooth, 0.0f, 1.0f, "%.2f");
+			Help("Each lip's bones are evened out against the ones next to them, so no single bone pokes out further than its neighbours (a spike at the side of a snout). Heads with only three bones per lip (people's) are left alone.");
+			ch |= Slider("Lower lip closes onto the shaft", &c.lowerLipClose, 1.0f, 3.0f, "x%.2f");
+			Help("When the jaw opens further than the shaft needs (a thick knot, or a low \"Jaw (units per 100)\"), the lower lip comes back up onto the shaft. Raise this if a gap stays under the shaft. Needs \"Close in round a slim shaft\" above 0.");
 			ch |= Slider("Round the lower lip", &c.lowerLipRound, 0.0f, 1.5f, "%.2f units");
 			Help("As the jaw opens, the sides of the lower lip (between its middle and the corners) push out and down, so the opening is round instead of a diamond pinched in at the sides of the lower lip. 0 = off. Needs the 0.4.4 head morphs (DF_LowerLipRound).");
 			Section("Corners");
@@ -546,6 +552,28 @@ namespace DeepFit::Menu
 		void __stdcall DrawThroat() { Page(ThroatBody); }
 		void __stdcall DrawSounds() { Page(SoundsBody); }
 
+		// 0.5.0: beards and facial hair - one set for every head (not per head type)
+		void __stdcall DrawBeards()
+		{
+			auto& c = Config::get();
+			bool  ch = false;
+			ImGuiMCP::TextWrapped("%s", T("Note: only a beard the game animates - one that moves when he talks or makes faces - can follow the mouth. A static beard (one that never moves with his expressions) is a fixed mesh DeepFit cannot bend: it is listed below as static and stays as it is. \"Shave my beard for the scene\" hides it instead."));
+			ImGuiMCP::Separator();
+			ch |= Check("Shave my beard for the scene", &c.beardShave);
+			Help("Your beard and moustache are hidden while a shaft is at your mouth in a scene, and come back after. Nothing is changed on your character (RaceMenu) - only hidden for the scene.");
+			ch |= Check("Beards follow the mouth", &c.beardFollow);
+			Help("A beard moves with the face under it: the moustache with the upper lip, the chin beard down with the jaw and lower lip, the sides with the corners - as far as DeepFit moves that part of the face (its morphs and lip bones). The beard's own expressions and lip sync play as before.");
+			ch |= Slider("How much they follow", &c.beardStrength, 0.0f, 1.5f, "x%.2f");
+			Help("1 = exactly as the face under it moves. Lower if a beard looks stretched, higher if it lags behind the lips.");
+			ch |= Slider("Follow within", &c.beardReach, 0.5f, 8.0f, "%.1f units of the face");
+			Help("Beard this close to the face follows it fully; further out it follows less, and not at all past twice this. Raise it for long beards that should swing down with the jaw, lower it if hair far from the mouth moves.");
+			Section("Your beard");
+			ImGuiMCP::TextWrapped("%s", DeepFit::PlayerBeardText().c_str());
+			Help("What DeepFit found on your character: each facial hair part, and whether it can move (\"moves with his mouth\") or is static. Updated every few seconds.");
+			if (ch)
+				c.save();
+		}
+
 		void __stdcall DrawTesting()
 		{
 			ImGuiMCP::TextWrapped("%s", T("A made-up schlong goes into the player's mouth, so you can tune the mouth and throat here without starting a scene. Not saved - switch it off when done. Needs a head built for DeepFit on the player."));
@@ -733,6 +761,7 @@ namespace DeepFit::Menu
 		SKSEMenuFramework::AddSectionItem("Mouth", DrawMouthPage);
 		SKSEMenuFramework::AddSectionItem("Face", DrawFace);
 		SKSEMenuFramework::AddSectionItem("Throat", DrawThroat);
+		SKSEMenuFramework::AddSectionItem("Beards", DrawBeards);   // 0.5.0
 		SKSEMenuFramework::AddSectionItem("Sounds", DrawSounds);
 		SKSEMenuFramework::AddSectionItem("Testing", DrawTesting);
 		SKSEMenuFramework::AddSectionItem("Info", DrawInfo);
