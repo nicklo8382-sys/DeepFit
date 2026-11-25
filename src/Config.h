@@ -102,6 +102,10 @@ struct Config
 	float beardStrength = 1.0f;    // 0.5.0: how much (1 = as much as the face under them)
 	float beardReach = 3.0f;       // 0.5.0: beard further than this from the face follows less (none past twice as far)
 	bool  beardShave = false;      // 0.5.0: the player's beard hidden while he is in a scene
+	float lowerLipInward = 0.0f;   // 0.5.1: the lower lip feels the shaft this far further into the mouth (a shaft sloping down draws it down)
+	float jawFollow = 1.0f;        // 0.5.1: a head's "Lower Jaw" bone drops this many times as far as the front of the lower lip has to
+	float jawFollowMax = 2.5f;     // 0.5.1: ... at most this far
+	float cornerCloseMax = -1.0f;  // 0.5.1: the corners close in round the shaft at most this far (below 0: as far as the lips, LipCloseMax)
 	float lipSmooth = 0.0f;        // 0.4.9: each lip's bones smoothed against their neighbours (0-1; snouts - no spikes at the sides)
 	float lowerLipClose = 1.0f;    // 0.4.9: the lower lip comes up onto the shaft this many times harder (a gap under a canine's shaft)
 	float upperJawDown = 0.0f;     // 0.4.7: a beast's upper snout tilted down onto the shaft (0-1 of its DF_UpperJawDown; 1 = 10 degrees)

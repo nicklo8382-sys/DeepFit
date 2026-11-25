@@ -28,7 +28,8 @@ namespace
 		Corner,
 		Nose,
 		Throat,
-		Cheek   // 0.4.0
+		Cheek,  // 0.4.0
+		Jaw     // 0.5.1: a beast's whole lower jaw (a head profile's "Lower Jaw" bone) - drops as far as the front of the lower lip has to
 	};
 
 	struct BoneSpec
@@ -87,7 +88,7 @@ namespace
 			std::string kk = b.kind;
 			for (auto& c : kk)
 				c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-			const Kind kind = kk == "corner" ? Kind::Corner : kk == "nose" ? Kind::Nose : kk == "throat" ? Kind::Throat : kk == "cheek" ? Kind::Cheek : Kind::Lip;
+			const Kind kind = kk == "corner" ? Kind::Corner : kk == "nose" ? Kind::Nose : kk == "throat" ? Kind::Throat : kk == "cheek" ? Kind::Cheek : kk == "jaw" ? Kind::Jaw : Kind::Lip;
 			const NiPoint3 d(b.x, b.y, b.z);
 			auto it = std::find_if(v.begin(), v.end(), [&](const HeadSpec& h) { return h.name == b.name; });
 			if (it != v.end()) {
@@ -218,6 +219,7 @@ namespace
 			std::vector<NiPoint3>  morph[kMorphs];      // DeepFit's morphs on it (at 100), where its .tri files have them
 			struct BW { std::int8_t spec[4]{}; float w[4]{}; int n = 0; };
 			std::vector<BW>        bw;                  // DeepFit's bones on each of its vertices
+			int                    weighted = 0;
 		};
 		struct Beard
 		{
@@ -1547,7 +1549,10 @@ namespace
 				int hits = 0;
 				auto scan = [&](float slab, float lane) {
 					for (auto& p : hs) {
-						if (std::fabs(p.y - rh.y) > slab)
+						// 0.5.1: the lower lip also feels the shaft a little further into the mouth ("Lower lip follows the shaft
+						// in"): a shaft sloping down into the mouth then draws the front of the lower lip (and the jaw) down to it
+						const float in = (d.z < 0.0f && spec.kind == Kind::Lip) ? cfg.lowerLipInward : 0.0f;
+						if (p.y > rh.y + slab || p.y < rh.y - slab - in)
 							continue;
 						if (std::fabs(p.x * e.x + p.z * e.z) > lane)
 							continue;
@@ -1569,7 +1574,7 @@ namespace
 				if (DeepFit::MouthNow()) {   // 0.2.0: the morphs opened the mouth; the bones fit the lips to the shaft (out, or back in round a slim one)
 					// (0.4.2: closing in round a slim shaft only when it is in his mouth - a shaft just under his chin pulled
 					// his upper lip 5 units in)
-					target[i] = sMax > -1e8f ? std::clamp(sMax + cfg.lipMargin + cfg.stretch - sRest - comp[i], (DeepFit::MegaMouthNow() || !inMouth) ? 0.0f : -cfg.lipCloseMax, mx) : 0.0f;
+					target[i] = sMax > -1e8f ? std::clamp(sMax + cfg.lipMargin + cfg.stretch - sRest - comp[i], (DeepFit::MegaMouthNow() || !inMouth) ? 0.0f : -(spec.kind == Kind::Corner && cfg.cornerCloseMax >= 0.0f ? cfg.cornerCloseMax : cfg.lipCloseMax), mx) : 0.0f;
 					// 0.3.3: the lip-round morph peaks the middle of the upper lip up towards the nose - pull it back down
 					// 0.4.5: the upper lip down onto a shaft that sits lower than it (the thin front of the shaft rides low in his
 					// mouth on a shallow stroke) - harder, as its bones are only half weighted
@@ -1653,6 +1658,15 @@ namespace
 				}
 			}
 		}
+		// 0.5.1: the whole lower jaw drops as far as the front of the lower lip has to go down (never up) - the jaw unhinges
+		// a little for a shaft that slopes down into the mouth, instead of the lip alone stretching
+		// (three bones along the jaw - front, middle, back - each as far as the length of its direction in the head profile
+		// says: 1 at the front, less further back, so the jaw bends a little instead of dropping as one piece)
+		for (int i = 0; i < r.nspecs(); ++i)
+			if (r.specs[i].kind == Kind::Jaw && r.bones[i].valid) {
+				const float share = std::clamp(len(r.specs[i].dir), 0.0f, 1.0f);
+				target[i] = (DeepFit::MouthNow() && r.bones[kBottomCenter].valid) ? std::clamp(target[kBottomCenter] * cfg.jawFollow, 0.0f, cfg.jawFollowMax) * share : 0.0f;
+			}
 		// nose base follows the upper lip centre
 		if (r.bones[8].valid)
 			target[8] = std::clamp(target[kUpperCenter] * cfg.noseFollow, 0.0f, cfg.noseMax);
@@ -2705,13 +2719,22 @@ namespace
 		if (!g || !headBind(g, hb.bind) || !dynVerts(g, hb.rest))
 			return false;
 		hb.geo = NiPointer<BSGeometry>(g);
-		const char* tri = hp->morphs[BGSHeadPart::MorphIndex::kRaceMorph].GetModel();
-		hb.tri = tri ? tri : "";
-		if (tri && *tri) {
+		// 0.5.1: its expression .tri (MaleHead.tri - what MFEE's ExtensionFile lines name) is the head part's second one;
+		// 0.5.0 looked only at the first (its race morphs, MaleHeadRaces.tri) and found none of DeepFit's morphs, so the
+		// beard did not follow the jaw
+		{
 			auto& ext = mfeeExtensions();
-			std::vector<std::string> files{ lowerPath(tri) };
-			if (auto it = ext.find(lowerPath(tri)); it != ext.end())
-				files.insert(files.end(), it->second.begin(), it->second.end());
+			std::vector<std::string> files;
+			for (auto mi : { BGSHeadPart::MorphIndex::kDefaultMorph, BGSHeadPart::MorphIndex::kRaceMorph, BGSHeadPart::MorphIndex::kChargenMorph }) {
+				const char* tri = hp->morphs[mi].GetModel();
+				if (!tri || !*tri)
+					continue;
+				if (hb.tri.empty())
+					hb.tri = tri;
+				files.push_back(lowerPath(tri));
+				if (auto it = ext.find(lowerPath(tri)); it != ext.end())
+					files.insert(files.end(), it->second.begin(), it->second.end());
+			}
 			for (auto& f : files) {
 				auto t = loadTri(f);
 				if (!t || t->nv != hb.rest.size())
@@ -2806,6 +2829,7 @@ namespace
 			if (e.n)
 				++weighted;
 		}
+		hb.weighted = weighted;
 		if (Config::get().debugLog)
 			logs::info("DeepFit: beards - {:08X}'s face {} ({} vertices): {} DeepFit morphs found in its .tri files ({}), {} vertices on DeepFit's bones",
 				act->GetFormID(), g->name.c_str() ? g->name.c_str() : "?", hb.rest.size(),
@@ -2921,7 +2945,8 @@ namespace
 			auto* base = act->GetActorBase();
 			auto* fhp = base ? base->GetCurrentHeadPartByType(BGSHeadPart::HeadPartType::kFace) : nullptr;
 			auto* fo = fhp ? root->GetObjectByName(fhp->formEditorID) : nullptr;
-			if (!r.beardHead.geo || fo != r.beardHead.geo.get()) {
+			// (0.5.1: also when it was read before his mouth bones were found - none of its vertices on them)
+			if (!r.beardHead.geo || fo != r.beardHead.geo.get() || (r.beardHead.weighted == 0 && r.found > 0)) {
 				for (auto& b : r.beards)
 					if (b.geo && b.culled)
 						b.geo->SetAppCulled(false);

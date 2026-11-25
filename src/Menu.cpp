@@ -307,6 +307,8 @@ namespace DeepFit::Menu
 			Section("Lips round the shaft");
 			ch |= Slider("Stretch past the shaft", &c.stretch, -1.0f, 1.0f, "%.2f");
 			ch |= Slider("Close in round a slim shaft", &c.lipCloseMax, 0.0f, 4.0f, "%.2f");
+			ch |= Slider("Corners close in at most", &c.cornerCloseMax, -1.0f, 6.0f, "%.2f");
+			Help("How far the mouth corners may close in towards the shaft's sides. A snout's corners sit far back from the shaft (a cat's mouth line is long), so they need further than the lips. -1 = the same as \"Close in round a slim shaft\".");
 			ch |= Slider("Upper lip, at most", &c.upperLipMax, 0.0f, 3.0f, "%.1f");
 			ch |= Slider("Upper lip down", &c.upperLipDown, -2.0f, 3.0f, "%.2f");
 			Help("While the mouth is full the upper lip is pulled down this far (its middle fully, the sides a little less) - the lip-round morph peaks it up towards the nose. Below 0 it is lifted instead (a cat's muzzle rising off the shaft).");
@@ -323,6 +325,11 @@ namespace DeepFit::Menu
 			Help("Each lip's bones are evened out against the ones next to them, so no single bone pokes out further than its neighbours (a spike at the side of a snout). Heads with only three bones per lip (people's) are left alone.");
 			ch |= Slider("Lower lip closes onto the shaft", &c.lowerLipClose, 1.0f, 3.0f, "x%.2f");
 			Help("When the jaw opens further than the shaft needs (a thick knot, or a low \"Jaw (units per 100)\"), the lower lip comes back up onto the shaft. Raise this if a gap stays under the shaft. Needs \"Close in round a slim shaft\" above 0.");
+			ch |= Slider("Lower lip follows the shaft in", &c.lowerLipInward, 0.0f, 4.0f, "%.1f units");
+			Help("The lower lip also feels the shaft this far further into the mouth. A shaft sloping down into the mouth then draws the front of the lower lip down to meet it, instead of the lip staying level with where the shaft crosses the lips. 0 = only at the lips.");
+			ch |= Slider("Lower jaw drops with the lip", &c.jawFollow, 0.0f, 2.0f, "x%.2f");
+			ch |= Slider("Lower jaw drops at most", &c.jawFollowMax, 0.0f, 5.0f, "%.1f units");
+			Help("Heads with a \"Lower Jaw\" bone (the Argonian High Poly Head): the whole lower jaw drops - unhinges a little - as far as the front of the lower lip has to go down, so the lip does not stretch on its own. Other heads ignore these.");
 			ch |= Slider("Round the lower lip", &c.lowerLipRound, 0.0f, 1.5f, "%.2f units");
 			Help("As the jaw opens, the sides of the lower lip (between its middle and the corners) push out and down, so the opening is round instead of a diamond pinched in at the sides of the lower lip. 0 = off. Needs the 0.4.4 head morphs (DF_LowerLipRound).");
 			Section("Corners");
