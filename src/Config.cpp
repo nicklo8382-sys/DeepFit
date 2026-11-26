@@ -117,7 +117,8 @@ void Config::applyKey(const std::string& k, const std::string& v)
 		else if (k == "FaceEyes") fl(faceEyes);
 		else if (k == "FaceBrows") fl(faceBrows);
 		else if (k == "FaceGag") fl(faceGag);
-		else if (k == "LipDrag") fl(lipDrag);
+		// (0.5.3: split into shorter chains - MSVC stops at 128 else-ifs in a row: "blocks nested too deeply")
+		if (k == "LipDrag") fl(lipDrag);
 		else if (k == "LipDragSpeed") fl(lipDragSpeed);
 		else if (k == "RecoverHold") fl(recoverHold);
 		else if (k == "RecoverOpen") fl(recoverOpen);
@@ -157,7 +158,8 @@ void Config::applyKey(const std::string& k, const std::string& v)
 		else if (k == "LipCloseMax") fl(lipCloseMax);
 		else if (k == "TeethHide") bl(teethHide);
 		else if (k == "ReadAfterPPA") bl(readAfterPpa);
-		else if (k == "UpperLipClose") fl(upperLipClose);
+		// (0.5.3: split into shorter chains - MSVC stops at 128 else-ifs in a row: "blocks nested too deeply")
+		if (k == "UpperLipClose") fl(upperLipClose);
 		else if (k == "LowerLipClose") fl(lowerLipClose);
 		else if (k == "LipSmooth") fl(lipSmooth);
 		else if (k == "PullOutHold") fl(pullOutHold);
@@ -197,7 +199,8 @@ void Config::applyKey(const std::string& k, const std::string& v)
 		else if (k == "ExtraChance") fl(extraChance);
 		else if (k == "ExtraHold") fl(extraHold);
 		else if (k == "ExtraSwell") fl(extraSwell);
-		else if (k == "SoundGag") fl(soundGag);
+		// (0.5.3: split into shorter chains - MSVC stops at 128 else-ifs in a row: "blocks nested too deeply")
+		if (k == "SoundGag") fl(soundGag);
 		else if (k == "SoundGasp") fl(soundGasp);
 		else if (k == "SoundOwnOnly") bl(soundOwnOnly);
 	}
