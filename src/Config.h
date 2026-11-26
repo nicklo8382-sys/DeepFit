@@ -101,11 +101,17 @@ struct Config
 	bool  beardFollow = true;      // 0.5.0: beards move with the mouth (DeepFit's morphs and lip bones, from the face under them)
 	float beardStrength = 1.0f;    // 0.5.0: how much (1 = as much as the face under them)
 	float beardReach = 3.0f;       // 0.5.0: beard further than this from the face follows less (none past twice as far)
+	bool  beardBones = true;       // 0.5.4: beards also follow DeepFit's lip bones (two morphs per bone in the beard's .tri)
 	bool  beardShave = false;      // 0.5.0: the player's beard hidden while he is in a scene
 	float lowerLipInward = 0.0f;   // 0.5.1: the lower lip feels the shaft this far further into the mouth (a shaft sloping down draws it down)
 	float jawFollow = 1.0f;        // 0.5.1: a head's "Lower Jaw" bone drops this many times as far as the front of the lower lip has to
 	float jawFollowMax = 2.5f;     // 0.5.1: ... at most this far
 	float cornerCloseMax = -1.0f;  // 0.5.1: the corners close in round the shaft at most this far (below 0: as far as the lips, LipCloseMax)
+	float openEase = 0.0f;         // 0.5.4: the jaw opens no faster than this (seconds to open fully; 0 = at once) - no jump on the way in
+	float tonguePush = 1.0f;       // 0.5.4: DeepFit's mouths: the tongue pushed down by the shaft (0-1.5; 0 = it stays)
+	float tongueHeight = 1.0f;     //   ... how far its top is above the floor of the mouth
+	float tongueMax = 2.0f;        //   ... at most this far down
+	bool  jawToUnderside = false;  // 0.5.4: the jaw opens to the shaft's underside below the lower lip, not its whole height (snouts)
 	float jawFitShaft = 0.0f;      // 0.5.3: the jaw bones fit the shaft's underside at their own depth (0-1; the front bends up onto a sloping shaft)
 	float cornerClose = 1.0f;      // 0.5.2: the corners come in onto the shaft's sides this many times harder
 	float pullOutHold = 0.0f;      // 0.5.2: the mouth closes at most this slowly (seconds to close fully; 0 = off) - no snapping on the thin tip

@@ -525,6 +525,8 @@ namespace DeepFit::Menu
 			Help("While the mouth is full the lower lip is pushed up this far (its middle fully, the sides a little less), closer round the shaft.");
 			ch |= Slider("Pull-out hold", &c.pullOutHold, 0.0f, 2.0f, "%.2f s");
 			Help("As he pulls back, only the thin tip of his schlong is between the lips for a moment: the mouth snapped shut onto it and open again (jerky). With this, the lips and jaw close no faster than this many seconds for the whole way - they still open at once round a thicker part. 0 = off; about 0.4-0.8 for a snout.");
+			ch |= Slider("Opening ease", &c.openEase, 0.0f, 1.0f, "%.2f s");
+			Help("As the tip goes in, the jaw opens no faster than this many seconds for the whole way, so it does not jump open in one frame (a jerk of the lower jaw on the way in). Too high and a thick part pushes into the lips before the jaw is open. 0 = off; about 0.2-0.35 for a snout.");
 			ch |= Slider("Lips follow speed", &c.smoothSpeed, 4.0f, 40.0f, "%.0f");
 			Help("How fast the lips and jaw bones catch up with the shaft (per second). Lower is smoother on a shaft that is thicker in some places than others (a snout's lips jerked from one size to the next); higher sticks closer. Each head keeps its own.");
 			ch |= Slider("Smooth the lips", &c.lipSmooth, 0.0f, 1.0f, "%.2f");
@@ -536,6 +538,8 @@ namespace DeepFit::Menu
 			ch |= Slider("Lower jaw drops with the lip", &c.jawFollow, 0.0f, 2.0f, "x%.2f");
 			ch |= Slider("Lower jaw drops at most", &c.jawFollowMax, 0.0f, 5.0f, "%.1f units");
 			ch |= Slider("Lower jaw fits the shaft's slope", &c.jawFitShaft, 0.0f, 1.0f, "%.2f");
+			ch |= Check("Open the jaw to the shaft's underside", &c.jawToUnderside);
+			Help("For snouts, where only the lower jaw opens: it drops as far as the underside of the shaft is below the lower lip, not the shaft's whole height. A shaft riding high in the mouth (along the upper teeth) no longer leaves the jaw hanging open far below it.");
 			Help("Each lower jaw bone (front, middle, back) finds the underside of the shaft right above it and goes to it, so the front of the jaw bends up onto a shaft that slopes up out of the mouth while the back stays lower. 0 = they only follow the lower lip; 1 = they fit the shaft. Heads with \"Lower Jaw\" bones only.");
 			Help("Heads with a \"Lower Jaw\" bone (the Argonian High Poly Head): the whole lower jaw drops - unhinges a little - as far as the front of the lower lip has to go down, so the lip does not stretch on its own. Other heads ignore these.");
 			ch |= Slider("Round the lower lip", &c.lowerLipRound, 0.0f, 1.5f, "%.2f units");
@@ -625,6 +629,9 @@ namespace DeepFit::Menu
 			Section("Teeth");
 			ch |= Check("Teeth part while the mouth is full", &c.teethOpen);
 			ch |= Check("Hide his teeth during a scene", &c.teethHide);
+			ch |= Slider("Tongue pushed down by the shaft", &c.tonguePush, 0.0f, 1.5f, "x%.2f");
+			ch |= Slider("Tongue pushed down at most", &c.tongueMax, 0.0f, 4.0f, "%.1f units");
+			Help("DeepFit's own mouths (the Argonian's): the floor and lower gums of the mouth go down and bend with the lower jaw bones, and the tongue is pushed down where the shaft lies on it. 0 = the tongue stays as it is.");
 			Help("His teeth and tongue (the parts named in TeethParts) are hidden while he is in a scene and shown again after. Beast heads have it on: their jaw drops further than their teeth go with it.");
 			{
 				static const char* kTeeth[] = { "Off", "While the mouth is full", "The whole scene" };
@@ -781,6 +788,8 @@ namespace DeepFit::Menu
 			Help("Your beard and moustache are hidden while a shaft is at your mouth in a scene, and come back after. Nothing is changed on your character (RaceMenu) - only hidden for the scene.");
 			ch |= Check("Beards follow the mouth", &c.beardFollow);
 			Help("A beard moves with the face under it: the moustache with the upper lip, the chin beard down with the jaw and lower lip, the sides with the corners - as far as DeepFit moves that part of the face (its morphs and lip bones). The beard's own expressions and lip sync play as before.");
+			ch |= Check("Beards follow the lip bones too", &c.beardBones);
+			Help("The lips are mostly pushed by DeepFit's bones, not its morphs: with this the beard over each lip bone moves with it as well, so the moustache and chin beard stay on the lips instead of sinking into them. Takes effect from the next game start.");
 			ch |= Slider("How much they follow", &c.beardStrength, 0.0f, 1.5f, "x%.2f");
 			Help("1 = exactly as the face under it moves. Lower if a beard looks stretched, higher if it lags behind the lips. Takes effect from the next game start.");
 			ch |= Slider("Follow within", &c.beardReach, 0.5f, 8.0f, "%.1f units of the face");

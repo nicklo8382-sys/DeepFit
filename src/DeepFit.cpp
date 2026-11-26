@@ -69,6 +69,24 @@ namespace
 	constexpr int kNumSpecs = static_cast<int>(sizeof(kSpecs) / sizeof(kSpecs[0]));
 	constexpr int kMaxSpecs = 48;   // 0.4.6: DeepFit's own bones plus what a head profile adds
 
+	// 0.5.4: the lips are mostly moved by DeepFit's bones, not its morphs - a beard following only the morphs stayed where
+	// the lips were pushed out of it (the moustache sank into the upper lip, the chin beard into the lower). Each lip bone
+	// also gets two morphs in the beard's .tri - the beard over it moved 1 unit out along the bone's push (P) and in (N),
+	// scaled to kBeardBoneUnits at 100 - and DeepFit sets them as the bone moves
+	constexpr float kBeardBoneUnits = 5.0f;
+	const std::string& beardBoneName(int a_spec, bool a_in)
+	{
+		static std::vector<std::string> names = [] {
+			std::vector<std::string> v;
+			for (int i = 0; i < kMaxSpecs; ++i) {
+				v.push_back("DF_BeardBone" + std::to_string(i) + "P");
+				v.push_back("DF_BeardBone" + std::to_string(i) + "N");
+			}
+			return v;
+		}();
+		return names[a_spec * 2 + (a_in ? 1 : 0)];
+	}
+
 	// 0.4.6: the bones one head has: DeepFit's own list, then its head profile's changes (direction / kind) and additions
 	struct HeadSpec
 	{
@@ -164,7 +182,13 @@ namespace
 		ActorHandle           actor;                 // 0.2.0: whose face the morphs go on
 		float                 morph[kMorphs] = {};   // 0.2.0: eased mouth morph values (0-100)
 		int                   sent[kMorphs];   // set to -1 (never sent) in the constructor
-		Receiver() { std::fill(std::begin(sent), std::end(sent), -1); }
+		int                   beardSent[kMaxSpecs * 2];   // 0.5.4: the beard's bone morphs (out / in for each lip bone), as sent
+		std::uint64_t         beardBones = 0;             // 0.5.4: the lip bones his beards have morphs for (DF_BeardBone<i>P / N)
+		Receiver()
+		{
+			std::fill(std::begin(sent), std::end(sent), -1);
+			std::fill(std::begin(beardSent), std::end(beardSent), -1);
+		}
 		float                 sendTimer = 0.0f;
 		bool                  teeth = false;
 		bool                  teethSent = false;
@@ -194,6 +218,11 @@ namespace
 		NiPointer<NiNode>      teethNode;
 		NiPointer<NiNode>      teethHideNode;            // 0.5.2: the teeth slot of DeepFit's mouths hangs here, shrunk
 		std::vector<TeethHook> teethSlots;
+		// 0.5.4: DeepFit's mouths (six bones: head, teeth, three lower-jaw ones, tongue) - their lower gums and floor follow
+		// his lower jaw bones and the tongue is pushed down by the shaft; the mouth's own bones hang on these nodes of DeepFit's
+		NiPointer<NiNode>      mouthNodes[4];
+		std::vector<TeethHook> mouthSlots;
+		float                  tongueWant = 0.0f, tongueCur = 0.0f, mouthScan = 0.0f;
 		float                  teethK = 0.0f, teethScan = 0.0f;
 		NiPoint3               mouthC{ 0, 0, 0 };        // 0.4.0: the middle of his lips (world), and the test schlong's
 		float                  previewD = 0.0f, previewR = 1.3f;   // tip depth and thickness this frame
@@ -233,6 +262,8 @@ namespace
 			std::vector<float>         dist;   // how far it is from the face
 			NiMatrix3                  toBeard;
 			float                      toBeardK = 1.0f;
+			NiMatrix3                  toBeardRot;          // 0.5.4: head bone -> beard mesh
+			float                      toBeardHeadK = 1.0f;
 			bool                       culled = false;
 		};
 		BeardHead              beardHead;
@@ -1259,7 +1290,16 @@ namespace
 				// 0.4.4: a knotted schlong all the way in: the knot at his lips opens his mouth further
 				const bool knotIn = g_clock - r.shapeAt < 5.0 && r.shape == 4 && depth > cfg.throatFrom + cfg.autoDeep;
 				r.knotOpen += ((knotIn ? cfg.shapeKnotOpen : 0.0f) - r.knotOpen) * (1.0f - std::exp(-delta * 4.0f));
-				const float open = height + cfg.mouthExtra + r.knotOpen;
+				// 0.5.4: "Open the jaw to the shaft's underside" (snouts) - only the lower jaw opens, so it drops as far as the
+				// shaft's underside is below the lower lip, not the shaft's whole height: a shaft riding high in a snout (on
+				// the upper teeth) left the jaw hanging open far below it
+				float body = height;
+				if (cfg.jawToUnderside && r.bones[kBottomCenter].valid && zTop > zBot) {
+					const float lowRest = dot(rest[kBottomCenter] - C, Z);
+					const float under = std::max(zBot, zTop - height);   // (the along-the-shaft cut's height, when it read less)
+					body = std::clamp(lowRest - under, 0.0f, height);
+				}
+				const float open = body + cfg.mouthExtra + r.knotOpen;
 				want[0] = DeepFit::MegaMouthNow() ? cfg.morphMax : open / std::max(cfg.jawUnits, 0.1f) * 100.0f;
 				want[1] = DeepFit::MegaMouthNow() ? cfg.morphMax * cfg.lipRound : open * 0.5f / std::max(cfg.lipUnits, 0.1f) * 100.0f * cfg.lipRound;
 				// 0.3.8: the corners go out to the sides too - to the shaft's width (plus MouthExtra) and a share of how far
@@ -1504,6 +1544,10 @@ namespace
 				// as he pulls back, the thin tip at the lips no longer snaps the mouth shut and open again
 				if (cfg.pullOutHold > 0.0f && (m == 0 || m == 1 || m == 2 || m == kMouthWide) && want[m] < r.morph[m])
 					want[m] = std::max(want[m], r.morph[m] - 100.0f * delta / cfg.pullOutHold);
+				// 0.5.4: "Opening ease" - the other way: as the tip goes in, the jaw opens no faster than this (all the way
+				// in that many seconds), so it does not jump open in one frame
+				if (cfg.openEase > 0.0f && (m == 0 || m == 1 || m == 2 || m == kMouthWide) && want[m] > r.morph[m])
+					want[m] = std::min(want[m], r.morph[m] + 100.0f * delta / cfg.openEase);
 				r.morph[m] += (want[m] - r.morph[m]) * km;
 			}
 			r.teeth = cfg.teethOpen && (through || inMouth);
@@ -1713,6 +1757,34 @@ namespace
 					}
 				}
 			}
+		// 0.5.4: the tongue (DeepFit's mouths): pushed down as far as the shaft's underside is below its top, between the
+		// middle and the front of the lower jaw
+		r.tongueWant = 0.0f;
+		if (cfg.tonguePush > 0.0f && DeepFit::MouthNow() && inMouth) {
+			int jf = -1, jm = -1;
+			for (int i = 0; i < r.nspecs(); ++i)
+				if (r.specs[i].kind == Kind::Jaw && r.bones[i].valid) {
+					if (r.specs[i].name == "Lower Jaw Front") jf = i;
+					else if (r.specs[i].name == "Lower Jaw Mid") jm = i;
+				}
+			if (jf >= 0 && jm >= 0) {
+				const NiPoint3 at = (rest[jf] + rest[jm]) * 0.5f - C;
+				const NiPoint3 rh(dot(at, X), dot(at, Y), dot(at, Z));
+				float          zMin = 1e9f;
+				int            hits = 0;
+				for (auto& p : hs)
+					if (std::fabs(p.y - rh.y) < 2.0f && std::fabs(p.x - rh.x) < 1.5f && p.z > rh.z - 8.0f) {
+						zMin = std::min(zMin, p.z);
+						++hits;
+					}
+				if (hits >= 2) {
+					// the floor here after the jaw morph and the jaw bones, and the tongue lying on it
+					const float drop = std::clamp(r.morph[0] / 100.0f, 0.0f, 1.0f) * headJawDrop(r) * 0.75f + 0.5f * (target[jf] + target[jm]) * 0.9f;
+					const float top = rh.z - drop + cfg.tongueHeight;
+					r.tongueWant = std::clamp((top - (zMin - cfg.lipMargin)) * cfg.tonguePush, 0.0f, cfg.tongueMax);
+				}
+			}
+		}
 		// nose base follows the upper lip centre
 		if (r.bones[8].valid)
 			target[8] = std::clamp(target[kUpperCenter] * cfg.noseFollow, 0.0f, cfg.noseMax);
@@ -1725,6 +1797,10 @@ namespace
 				if (r.bones[i].valid && (kd == Kind::Lip || kd == Kind::Corner || kd == Kind::Jaw) && target[i] < r.bones[i].cur)
 					target[i] = std::max(target[i], r.bones[i].cur - 4.0f * delta / cfg.pullOutHold);
 			}
+		if (cfg.openEase > 0.0f)   // 0.5.4: and the jaw bones open no faster than "Opening ease"
+			for (int i = 0; i < r.nspecs(); ++i)
+				if (r.bones[i].valid && r.specs[i].kind == Kind::Jaw && target[i] > r.bones[i].cur)
+					target[i] = std::min(target[i], r.bones[i].cur + 4.0f * delta / cfg.openEase);
 		// smooth + apply
 		const float k = 1.0f - std::exp(-delta * cfg.smoothSpeed);
 		// 0.4.5: a low-poly shaft: the lips ease more slowly (its few vertices step from frame to frame)
@@ -2126,6 +2202,25 @@ namespace
 				logs::info("DeepFit: driving the mouth morphs through MFEE ({}...)", kMorphNames[m]);
 			}
 		}
+		// 0.5.4: his beards over the lip bones, as far as each bone moved (out or in)
+		if (r.beardBones && Config::get().beardFollow && Config::get().beardBones)
+			for (int sp = 0; sp < r.nspecs() && sp < kMaxSpecs; ++sp) {
+				if (!(r.beardBones & (1ull << sp)))
+					continue;
+				const float cur = r.bones[sp].valid ? r.bones[sp].cur : 0.0f;
+				for (int in = 0; in < 2; ++in) {
+					const float raw = (in ? -cur : cur) / kBeardBoneUnits * 100.0f;
+					const int   v = std::clamp(static_cast<int>(std::lround(raw)), 0, 100);
+					int&        last = r.beardSent[sp * 2 + in];
+					if (last >= 0 && std::abs(v - last) < 2 && !(v == 0 && last != 0))
+						continue;
+					last = v;
+					BSTSmartPointer<BSScript::IStackCallbackFunctor> cb;
+					auto* args = MakeFunctionArguments(static_cast<Actor*>(act.get()), BSFixedString(beardBoneName(sp, in == 1).c_str()), static_cast<std::int32_t>(v),
+						static_cast<std::int32_t>(cfg.morphLerpMs));
+					vm->DispatchStaticCall("MuFacialExpressionExtended", "SetExpressionByNameEx", args, cb);
+				}
+			}
 	}
 
 	// 0.4.0: the teeth moved a little down / back. Their weights on his head bone are hung on a node of DeepFit's own under
@@ -2134,6 +2229,74 @@ namespace
 	// mode 2 always (only the actors DeepFit fits, and only when chosen).
 	// 0.4.6: his teeth and mouth parts (TeethParts) hidden while he is in a scene - on a beast head the jaw drops past them
 	// (they follow only its own jaw shape) - and shown again after
+	// 0.5.4: DeepFit's rigged mouths - their bones 2-4 hang on nodes that copy how far his three lower jaw bones moved (so
+	// the gums and floor of his mouth go down and fold with the jaw, no gap under the lips), bone 5 on one the shaft pushes
+	// down (the tongue). The nodes sit at his head bone, as the mouth's own bones do, so nothing moves while DeepFit is idle
+	void rigMouth(Receiver& r, Actor* act, float delta)
+	{
+		auto* headNode = r.head ? r.head->AsNode() : nullptr;
+		if (!headNode)
+			return;
+		for (auto& n : r.mouthNodes)
+			if (!n || n->parent != headNode) {
+				n = NiPointer<NiNode>(NiNode::Create(0));
+				n->name = "DF Mouth Rig";
+				n->local = NiTransform();
+				headNode->AttachChild(n.get(), true);
+			}
+		// where each lower jaw bone is against its rest, in his head bone's space (its parents only move, never turn)
+		static const char* kJaw[3] = { "Lower Jaw Front", "Lower Jaw Mid", "Lower Jaw Back" };
+		for (int k = 0; k < 3; ++k) {
+			NiPoint3 d;
+			for (int i = 0; i < r.nspecs(); ++i)
+				if (r.specs[i].name == kJaw[k] && r.bones[i].valid && r.bones[i].node) {
+					d = r.bones[i].node->local.translate - r.bones[i].restLocal;
+					break;
+				}
+			r.mouthNodes[k]->local = NiTransform();
+			r.mouthNodes[k]->local.translate = d;
+		}
+		// the tongue: down (his face's down, in head-bone space), eased
+		r.tongueCur += (r.tongueWant - r.tongueCur) * (1.0f - std::exp(-delta * 10.0f));
+		{
+			const NiTransform& H = r.head->world;
+			const float        hs = H.scale > 1e-6f ? H.scale : 1.0f;
+			r.mouthNodes[3]->local = NiTransform();
+			r.mouthNodes[3]->local.translate = (H.rotate.Transpose() * (r.fz * -r.tongueCur)) * (1.0f / hs);
+		}
+		for (auto& n : r.mouthNodes)
+			n->world = r.head->world * n->local;
+		// hang the rigged mouths' bones on them (again after the face is rebuilt)
+		r.mouthScan -= delta;
+		if (r.mouthScan > 0.0f)
+			return;
+		r.mouthScan = 1.0f;
+		auto* root = act ? act->Get3D(false) : nullptr;
+		if (!root)
+			return;
+		traverse(root, [&](NiAVObject* o) {
+			auto* geo = o ? o->AsGeometry() : nullptr;
+			auto* si = geo ? geo->GetGeometryRuntimeData().skinInstance.get() : nullptr;
+			if (!si || !si->skinData || !si->bones || !si->boneWorldTransforms || si->skinData->bones != 6)
+				return;
+			auto onHead = [&](NiAVObject* b) {
+				return b && (b == r.head.get() || (b->name.c_str() && std::strcmp(b->name.c_str(), "NPC Head [Head]") == 0));
+			};
+			if (!onHead(si->bones[0]))
+				return;
+			for (std::uint32_t i = 2; i < 6; ++i) {
+				NiNode* want = r.mouthNodes[i - 2].get();
+				if (si->bones[i] == want)
+					continue;
+				r.mouthSlots.push_back({ NiPointer<BSGeometry>(geo), i, NiPointer<NiAVObject>(si->bones[i]) });
+				si->bones[i] = want;
+				si->boneWorldTransforms[i] = &want->world;
+				if (Config::get().debugLog && i == 2)
+					logs::info("DeepFit: {} - its lower gums follow his jaw bones and its tongue the shaft", geo->name.c_str() ? geo->name.c_str() : "?");
+			}
+		});
+	}
+
 	void hideTeeth(Receiver& r, Actor* act, float delta)
 	{
 		const auto& cfg = cfgOf(r);
@@ -2248,7 +2411,8 @@ namespace
 					// 0.5.3: DeepFit's mouths have exactly two bones (his head, then the teeth): the teeth's one is re-hung
 					// whatever the game made of it (on the Argonian's it was neither his head bone nor found by name - the
 					// whole mouth, tongue and all, was hidden again)
-					const bool ours = si->skinData->bones == 2;
+					const bool rig = si->skinData->bones == 6;   // 0.5.4: a rigged mouth - only its teeth slot (1) here
+					const bool ours = si->skinData->bones == 2 || rig;
 					if (cfg.debugLog) {
 						std::string names;
 						for (std::uint32_t i = 0; i < si->skinData->bones; ++i)
@@ -2260,6 +2424,8 @@ namespace
 					for (std::uint32_t i = 1; i < si->skinData->bones; ++i) {
 						if (si->bones[i] == r.teethHideNode.get())
 							continue;   // ours already
+						if (rig && i != 1)
+							continue;
 						if (!ours && !onHead(si->bones[i]))
 							continue;
 						r.teethSlots.push_back({ NiPointer<BSGeometry>(geo), i, NiPointer<NiAVObject>(si->bones[i]) });
@@ -2927,6 +3093,7 @@ namespace
 	// DeepFit has not seen before follows the mouth from the next game start on.
 	constexpr const char* kBeardIni = "Data\\SKSE\\Plugins\\MuFacialExpressionExtended\\DeepFit_Beards.ini";
 
+
 	// the beards MFEE was told about when the game started (read once, before DeepFit adds any)
 	const std::unordered_set<std::string>& beardsAtStart()
 	{
@@ -3061,6 +3228,57 @@ namespace
 			}
 			++nm;
 		}
+		// 0.5.4: the lip bones' morphs (see kBeardBoneUnits)
+		if (cfg.beardBones && !hb.bw.empty() && r.head) {
+			const NiTransform& H = r.head->world;
+			const float        hs = H.scale > 1e-6f ? H.scale : 1.0f;
+			for (int sp = 0; sp < r.nspecs() && sp < kMaxSpecs; ++sp) {
+				const auto kd = r.specs[sp].kind;
+				if (kd != Kind::Lip && kd != Kind::Corner && kd != Kind::Jaw)
+					continue;
+				const NiPoint3 dn = norm(r.specs[sp].dir);
+				const NiPoint3 world = r.fx * dn.x + r.fy * dn.y + r.fz * dn.z;
+				NiPoint3       headDir = (H.rotate.Transpose() * world) * (1.0f / hs);   // 1 unit in the world, in head-bone space
+				// (rounded: the face axes wobble a hair from frame to frame - the .tri would differ every time it is made)
+				headDir = NiPoint3(std::round(headDir.x * 50.0f) / 50.0f, std::round(headDir.y * 50.0f) / 50.0f, std::round(headDir.z * 50.0f) / 50.0f);
+				// head bone -> beard mesh: the beard's own bind (as toBeard, which also carries the face mesh's into head space)
+				const NiPoint3 beardDir = b.toBeardRot * headDir * b.toBeardHeadK;
+				float          mx = 0.0f;
+				for (std::int32_t i = 0; i < nv; ++i) {
+					const float fade = std::clamp(2.0f - b.dist[i] / reach, 0.0f, 1.0f);
+					float       w = 0.0f;
+					if (fade > 0.0f)
+						for (int k = 0; k < 3; ++k) {
+							const std::uint32_t j = b.hv[i * 3 + k];
+							if (j < hb.bw.size())
+								for (int q = 0; q < hb.bw[j].n; ++q)
+									if (hb.bw[j].spec[q] == sp)
+										w += hb.bw[j].w[q] * b.hw[i * 3 + k];
+						}
+					d[i] = beardDir * (w * fade * cfg.beardStrength * kBeardBoneUnits);
+					mx = std::max({ mx, std::fabs(d[i].x), std::fabs(d[i].y), std::fabs(d[i].z) });
+				}
+				if (mx < 1e-3f)
+					continue;
+				const float k = mx / 32767.0f;
+				auto put = [&](const void* p, std::size_t n) { out.insert(out.end(), static_cast<const char*>(p), static_cast<const char*>(p) + n); };
+				for (int in = 0; in < 2; ++in) {
+					const std::string& mn = beardBoneName(sp, in == 1);
+					const std::int32_t len = static_cast<std::int32_t>(mn.size() + 1);
+					put(&len, 4);
+					put(mn.c_str(), mn.size() + 1);
+					put(&k, 4);
+					const float sg = in ? -1.0f : 1.0f;
+					for (std::int32_t i = 0; i < nv; ++i) {
+						const std::int16_t sv[3] = { static_cast<std::int16_t>(std::lround(sg * d[i].x / k)), static_cast<std::int16_t>(std::lround(sg * d[i].y / k)),
+							static_cast<std::int16_t>(std::lround(sg * d[i].z / k)) };
+						put(sv, 6);
+					}
+					++nm;
+				}
+				r.beardBones |= (1ull << sp);
+			}
+		}
 		const std::int32_t zero = 0;
 		std::memcpy(out.data() + 36, &nm, 4);     // morphs: DeepFit's
 		std::memcpy(out.data() + 40, &zero, 4);   // no modifiers ...
@@ -3141,6 +3359,8 @@ namespace
 			const NiTransform beardInv = bind.Invert();
 			b.toBeard = beardInv.rotate * hb.bind.rotate;
 			b.toBeardK = beardInv.scale * hb.bind.scale;
+			b.toBeardRot = beardInv.rotate;
+			b.toBeardHeadK = beardInv.scale;
 			b.n = static_cast<std::uint32_t>(pts.size());
 			b.hv.assign(b.n * 3, 0);
 			b.hw.assign(b.n * 3, 0.0f);
@@ -3663,6 +3883,14 @@ void DeepFit::OnFrame(float delta)
 						si->boneWorldTransforms[h.idx] = &h.orig->world;
 					}
 				}
+				for (auto& h : r.mouthSlots) {   // 0.5.4
+					auto* si = h.geo ? h.geo->GetGeometryRuntimeData().skinInstance.get() : nullptr;
+					if (si && si->bones && si->skinData && h.idx < si->skinData->bones && h.orig && h.idx >= 2 && h.idx < 6 &&
+						si->bones[h.idx] == r.mouthNodes[h.idx - 2].get()) {
+						si->bones[h.idx] = h.orig.get();
+						si->boneWorldTransforms[h.idx] = &h.orig->world;
+					}
+				}
 				dropBeards(r);   // 0.5.0
 				g_receivers.erase(it);
 			}
@@ -3795,6 +4023,7 @@ void DeepFit::OnFrame(float delta)
 		soundsFor(*r, recv);   // 0.4.4
 		updateTeeth(*r, recv, delta);
 		hideTeeth(*r, recv, delta);
+		rigMouth(*r, recv, delta);   // 0.5.4
 		beardsFor(*r, recv, delta);   // 0.5.0
 		if (recv->IsPlayerRef())
 			updateTestShaft(*r);   // 0.4.0: the test schlong, shown

@@ -24,7 +24,7 @@ static const std::unordered_set<std::string>& lookKeys()
 {
 	static const std::unordered_set<std::string> k{
 		"LipMargin", "LipDepthSlab", "LipLaneWidth", "UpperLipMax", "LowerLipMax", "CornerMax", "Stretch", "MinOpen", "MinCorner",
-		"LowerLipRound", "MouthExtra", "JawUnits", "LipUnits", "WidenUnits", "MorphMax", "LipCloseMax", "UpperLipDown", "UpperLipClose", "LowerLipClose", "LipSmooth", "PullOutHold", "CornerClose", "JawFitShaft", "CornerCloseMax", "LowerLipInward", "JawFollow", "JawFollowMax", "SmoothSpeed", "UpperJawDown", "LowerLipUp", "LipsAlongShaft",
+		"LowerLipRound", "MouthExtra", "JawUnits", "LipUnits", "WidenUnits", "MorphMax", "LipCloseMax", "UpperLipDown", "UpperLipClose", "LowerLipClose", "LipSmooth", "PullOutHold", "CornerClose", "JawFitShaft", "JawToUnderside", "TonguePush", "TongueHeight", "TongueMax", "OpenEase", "CornerCloseMax", "LowerLipInward", "JawFollow", "JawFollowMax", "SmoothSpeed", "UpperJawDown", "LowerLipUp", "LipsAlongShaft",
 		"FollowAim", "AimRadius", "AimMaxDeg", "ThroatFrom", "ThroatFull", "ThroatShape", "ThroatBand", "ThroatFill", "ThroatRest",
 		"ThroatShapeGain", "ThroatShapeMax", "ThroatWideUnits", "ThroatWideExtra", "ThroatDetail", "ThroatMotion", "ThroatMotionLength",
 		"LipRound", "MouthWideGain", "MouthWideMax", "CornerOpen", "ThroatAxisFit", "CheekGain", "CheekMax", "CheekInner",
@@ -165,11 +165,17 @@ void Config::applyKey(const std::string& k, const std::string& v)
 		else if (k == "PullOutHold") fl(pullOutHold);
 		else if (k == "CornerClose") fl(cornerClose);
 		else if (k == "JawFitShaft") fl(jawFitShaft);
+		else if (k == "JawToUnderside") bl(jawToUnderside);
+		else if (k == "TonguePush") fl(tonguePush);
+		else if (k == "TongueHeight") fl(tongueHeight);
+		else if (k == "TongueMax") fl(tongueMax);
+		else if (k == "OpenEase") fl(openEase);
 		else if (k == "CornerCloseMax") fl(cornerCloseMax);
 		else if (k == "LowerLipInward") fl(lowerLipInward);
 		else if (k == "JawFollow") fl(jawFollow);
 		else if (k == "JawFollowMax") fl(jawFollowMax);
 		else if (k == "BeardFollow") bl(beardFollow);
+		else if (k == "BeardBones") bl(beardBones);
 		else if (k == "BeardStrength") fl(beardStrength);
 		else if (k == "BeardReach") fl(beardReach);
 		else if (k == "BeardShave") bl(beardShave);
@@ -245,7 +251,7 @@ std::vector<std::pair<std::string, std::string>> Config::keyValues(bool lookOnly
 	auto b2 = [](bool v) { return std::string(v ? "1" : "0"); };
 	kv = {
 		{ "Enabled", b2(enabled) }, { "DebugLog", b2(debugLog) },
-		{ "BeardFollow", b2(beardFollow) }, { "BeardStrength", f2(beardStrength) }, { "BeardReach", f2(beardReach) }, { "BeardShave", b2(beardShave) },
+		{ "BeardFollow", b2(beardFollow) }, { "BeardBones", b2(beardBones) }, { "BeardStrength", f2(beardStrength) }, { "BeardReach", f2(beardReach) }, { "BeardShave", b2(beardShave) },
 		{ "LipMargin", f2(lipMargin) }, { "UpperLipMax", f2(upperLipMax) }, { "LowerLipMax", f2(lowerLipMax) }, { "CornerMax", f2(cornerMax) },
 		{ "Stretch", f2(stretch) }, { "MinOpen", f2(minOpen) }, { "MinCorner", f2(minCorner) },
 		{ "ThroatEnabled", b2(throatEnabled) }, { "ThroatGain", f2(throatGain) }, { "ThroatMax", f2(throatMax) },
@@ -268,7 +274,7 @@ std::vector<std::pair<std::string, std::string>> Config::keyValues(bool lookOnly
 		{ "ThroatShapeGain", f2(throatShapeGain) }, { "ThroatShapeMax", f2(throatShapeMax) }, { "ThroatWideUnits", f2(throatWideUnits) },
 		{ "ThroatWideExtra", f2(throatWideExtra) }, { "ThroatDetail", f2(throatDetail) },
 		{ "ThroatMotion", f2(throatMotion) }, { "ThroatMotionLength", f2(throatMotionLen) },
-		{ "TeethOpen", b2(teethOpen) }, { "LipCloseMax", f2(lipCloseMax) }, { "UpperLipDown", f2(upperLipDown) }, { "UpperLipClose", f2(upperLipClose) }, { "LowerLipClose", f2(lowerLipClose) }, { "LipSmooth", f2(lipSmooth) }, { "PullOutHold", f2(pullOutHold) }, { "CornerClose", f2(cornerClose) }, { "JawFitShaft", f2(jawFitShaft) }, { "CornerCloseMax", f2(cornerCloseMax) }, { "LowerLipInward", f2(lowerLipInward) }, { "JawFollow", f2(jawFollow) }, { "JawFollowMax", f2(jawFollowMax) }, { "SmoothSpeed", f2(smoothSpeed) }, { "UpperJawDown", f2(upperJawDown) },
+		{ "TeethOpen", b2(teethOpen) }, { "LipCloseMax", f2(lipCloseMax) }, { "UpperLipDown", f2(upperLipDown) }, { "UpperLipClose", f2(upperLipClose) }, { "LowerLipClose", f2(lowerLipClose) }, { "LipSmooth", f2(lipSmooth) }, { "PullOutHold", f2(pullOutHold) }, { "CornerClose", f2(cornerClose) }, { "JawFitShaft", f2(jawFitShaft) }, { "JawToUnderside", b2(jawToUnderside) }, { "TonguePush", f2(tonguePush) }, { "TongueHeight", f2(tongueHeight) }, { "TongueMax", f2(tongueMax) }, { "OpenEase", f2(openEase) }, { "CornerCloseMax", f2(cornerCloseMax) }, { "LowerLipInward", f2(lowerLipInward) }, { "JawFollow", f2(jawFollow) }, { "JawFollowMax", f2(jawFollowMax) }, { "SmoothSpeed", f2(smoothSpeed) }, { "UpperJawDown", f2(upperJawDown) },
 		{ "LowerLipUp", f2(lowerLipUp) }, { "LowerLipRound", f2(lowerLipRound) }, { "LipsAlongShaft", b2(lipsAlongShaft) },
 		{ "ReadAfterPPA", b2(readAfterPpa) }, { "FollowAim", b2(followAim) }, { "AimRadius", f2(aimRadius) }, { "AimMaxDeg", f2(aimMaxDeg) },
 		{ "DetectShapes", b2(detectShapes) }, { "ShapeFlare", f2(shapeFlare) }, { "ShapeKnotOpen", f2(shapeKnotOpen) },
