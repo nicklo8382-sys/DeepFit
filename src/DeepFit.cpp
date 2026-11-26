@@ -1220,6 +1220,7 @@ namespace
 						ux = len(ux) > 1e-4f ? norm(ux) : NiPoint3(1.0f, 0.0f, 0.0f);
 						const NiPoint3 uz(v.y * ux.z - v.z * ux.y, v.z * ux.x - v.x * ux.z, v.x * ux.y - v.y * ux.x);
 						float zl = 1e9f, zh = -1e9f, xl = 1e9f, xh = -1e9f;
+						int   cut = 0;
 						for (auto& p : hs) {
 							const NiPoint3 q = p - org;
 							const float    s = dot(q, v);
@@ -1230,15 +1231,24 @@ namespace
 							if (px * px + pz * pz > 36.0f)
 								continue;
 							zl = std::min(zl, pz); zh = std::max(zh, pz); xl = std::min(xl, px); xh = std::max(xh, px);
+							++cut;
 						}
-						if (zh > zl) {
+						// 0.5.3: only a real cut across the shaft - a slanted cut that caught a few points of one ring read the
+						// shaft as under 1 unit tall for a moment (deep in his mouth) and the jaw jerked shut and open again
+						if (zh > zl && cut >= 8 && zh - zl > 0.55f * height) {
 							height = std::min(height, zh - zl);
 							width = std::min(width, xh - xl);
 						}
 					}
 				}
 			}
-			if (through && zTop > zBot) {   // 0.4.5
+			// 0.5.3: and a sudden drop to under half while the shaft is still well inside his mouth is a gap in the
+			// shaft's mesh, not the shaft getting thinner: the last height is kept for a moment (a real pull-out still
+			// closes - the tip comes out past the lips)
+			if (through && zTop > zBot && depth > 3.0f && height < 0.5f * r.lastH && g_clock - r.lastThroughAt < 0.35) {
+				height = r.lastH;
+				width = std::max(width, r.lastW);
+			} else if (through && zTop > zBot) {   // 0.4.5
 				r.lastH = height;
 				r.lastW = width;
 				r.lastThroughAt = g_clock;
@@ -1677,6 +1687,31 @@ namespace
 				// (0.5.2: up as well as down - the front of the jaw folds up onto the shaft's underside when the jaw opened
 				// further than the shaft needs, instead of hanging below it)
 				target[i] = (DeepFit::MouthNow() && r.bones[kBottomCenter].valid) ? std::clamp(target[kBottomCenter] * cfg.jawFollow, -cfg.jawFollowMax, cfg.jawFollowMax) * share : 0.0f;
+				// 0.5.3: "Lower jaw fits the shaft's slope" - each jaw bone also finds the shaft's underside right above it
+				// (at its own depth in the mouth) and goes to it: the front of the jaw bends up onto a shaft that slopes up
+				// out of the mouth, the back stays down where the shaft is lower, instead of all three following the lip
+				if (cfg.jawFitShaft > 0.0f && DeepFit::MouthNow() && inMouth) {
+					const NiPoint3 rel = rest[i] - C;
+					const NiPoint3 rh(dot(rel, X), dot(rel, Y), dot(rel, Z));
+					float          zMin = 1e9f;
+					int            hits = 0;
+					for (auto& p : hs) {
+						if (std::fabs(p.y - rh.y) > cfg.lipDepthSlab * 1.5f || std::fabs(p.x - rh.x) > cfg.lipLaneWidth * 2.0f)
+							continue;
+						if (p.z < rh.z - cfg.jawFollowMax - 6.0f)
+							continue;   // far below anything the jaw could reach
+						zMin = std::min(zMin, p.z);
+						++hits;
+					}
+					if (hits >= 2) {
+						const NiPoint3 dn = norm(r.specs[i].dir);
+						// where the jaw morph left the floor of the mouth here, against the shaft's underside
+						const float floorZ = rh.z - std::clamp(r.morph[0] / 100.0f, 0.0f, 1.0f) * headJawDrop(r) * share;
+						const float down = floorZ - (zMin - cfg.lipMargin);   // > 0: the shaft is lower, the jaw goes down to it
+						const float fit = std::clamp(down / std::max(std::fabs(dn.z), 0.3f), -cfg.jawFollowMax, cfg.jawFollowMax) * std::max(share, 0.5f);
+						target[i] += (fit - target[i]) * std::clamp(cfg.jawFitShaft, 0.0f, 1.0f);
+					}
+				}
 			}
 		// nose base follows the upper lip centre
 		if (r.bones[8].valid)
@@ -2210,12 +2245,22 @@ namespace
 					auto onHead = [&](NiAVObject* b) {
 						return b && (b == r.head.get() || b == r.teethNode.get() || (b->name.c_str() && std::strcmp(b->name.c_str(), "NPC Head [Head]") == 0));
 					};
-					if (!onHead(si->bones[0]))
+					// 0.5.3: DeepFit's mouths have exactly two bones (his head, then the teeth): the teeth's one is re-hung
+					// whatever the game made of it (on the Argonian's it was neither his head bone nor found by name - the
+					// whole mouth, tongue and all, was hidden again)
+					const bool ours = si->skinData->bones == 2;
+					if (cfg.debugLog) {
+						std::string names;
+						for (std::uint32_t i = 0; i < si->skinData->bones; ++i)
+							names += std::string(i ? ", " : "") + (si->bones[i] ? (si->bones[i]->name.c_str() ? si->bones[i]->name.c_str() : "(unnamed)") : "(none)");
+						logs::info("DeepFit: {} - its bones: {}", geo->name.c_str() ? geo->name.c_str() : "?", names);
+					}
+					if (!ours && !onHead(si->bones[0]))
 						return;
 					for (std::uint32_t i = 1; i < si->skinData->bones; ++i) {
 						if (si->bones[i] == r.teethHideNode.get())
 							continue;   // ours already
-						if (!onHead(si->bones[i]))
+						if (!ours && !onHead(si->bones[i]))
 							continue;
 						r.teethSlots.push_back({ NiPointer<BSGeometry>(geo), i, NiPointer<NiAVObject>(si->bones[i]) });
 						si->bones[i] = r.teethHideNode.get();

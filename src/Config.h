@@ -106,6 +106,7 @@ struct Config
 	float jawFollow = 1.0f;        // 0.5.1: a head's "Lower Jaw" bone drops this many times as far as the front of the lower lip has to
 	float jawFollowMax = 2.5f;     // 0.5.1: ... at most this far
 	float cornerCloseMax = -1.0f;  // 0.5.1: the corners close in round the shaft at most this far (below 0: as far as the lips, LipCloseMax)
+	float jawFitShaft = 0.0f;      // 0.5.3: the jaw bones fit the shaft's underside at their own depth (0-1; the front bends up onto a sloping shaft)
 	float cornerClose = 1.0f;      // 0.5.2: the corners come in onto the shaft's sides this many times harder
 	float pullOutHold = 0.0f;      // 0.5.2: the mouth closes at most this slowly (seconds to close fully; 0 = off) - no snapping on the thin tip
 	float lipSmooth = 0.0f;        // 0.4.9: each lip's bones smoothed against their neighbours (0-1; snouts - no spikes at the sides)
