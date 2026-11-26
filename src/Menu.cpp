@@ -131,9 +131,208 @@ namespace DeepFit::Menu
 			logs::info("DeepFit: MFEE's Max set to {:.0f} in its ini (after a restart)", v);
 		}
 
-		bool Check(const char* label, bool* v) { return ImGuiMCP::Checkbox(T(label), v); }
-		bool Slider(const char* label, float* v, float lo, float hi, const char* fmt) { return ImGuiMCP::SliderFloat(T(label), v, lo, hi, T(fmt)); }
-		void Section(const char* t) { ImGuiMCP::SeparatorText(T(t)); }
+		// 0.5.2: a preset drop-down on each section of a page, for that head (men's, women's or a head profile): the built-in
+		// Subtle / Default / Extreme for just that section's sliders, and the player's own presets for that section. Which
+		// settings a section holds is found by itself: the sliders drawn under it the first time (each nudged once to see
+		// which setting it is)
+		struct SectionCtx
+		{
+			Config*     c = nullptr;
+			std::string head;            // its folder under Presets\Sections
+			const void* body = nullptr;  // which page
+		};
+		struct SectionInfo
+		{
+			bool                                            recording = false, done = false;
+			std::vector<std::pair<int, std::ptrdiff_t>>     offs;   // 0 float, 1 bool, 2 int - where in the settings
+			std::vector<std::string>                        keys;
+		};
+		struct SectionUI
+		{
+			char                     name[64] = {};
+			std::vector<std::string> files;
+			bool                     looked = false;
+		};
+		SectionCtx                                   g_sec;
+		std::unordered_map<std::string, SectionInfo> g_secs;
+		std::unordered_map<std::string, SectionUI>   g_secUI;
+		SectionInfo*                                 g_cur = nullptr;
+		bool                                         g_secChanged = false;
+
+		void Track(int type, void* p)
+		{
+			if (!g_cur || !g_cur->recording || !g_sec.c)
+				return;
+			const auto off = static_cast<char*>(p) - reinterpret_cast<char*>(g_sec.c);
+			if (off >= 0 && off < static_cast<std::ptrdiff_t>(sizeof(Config)))
+				g_cur->offs.emplace_back(type, off);
+		}
+
+		// the section's sliders were drawn once: nudge each and see which setting moved
+		void FinishSection()
+		{
+			if (g_cur && g_cur->recording && g_sec.c) {
+				Config&    c = *g_sec.c;
+				const auto kv0 = c.keyValues(true);
+				for (auto& [type, off] : g_cur->offs) {
+					void* p = reinterpret_cast<char*>(&c) + off;
+					float of = 0.0f;
+					bool  ob = false;
+					int   oi = 0;
+					if (type == 0) { of = *static_cast<float*>(p); *static_cast<float*>(p) = of + 1000.5f; }
+					else if (type == 1) { ob = *static_cast<bool*>(p); *static_cast<bool*>(p) = !ob; }
+					else { oi = *static_cast<int*>(p); *static_cast<int*>(p) = oi + 1000; }
+					const auto kv1 = c.keyValues(true);
+					if (type == 0) *static_cast<float*>(p) = of;
+					else if (type == 1) *static_cast<bool*>(p) = ob;
+					else *static_cast<int*>(p) = oi;
+					for (std::size_t i = 0; i < kv0.size() && i < kv1.size(); ++i)
+						if (kv0[i].second != kv1[i].second) {
+							if (std::find(g_cur->keys.begin(), g_cur->keys.end(), kv0[i].first) == g_cur->keys.end())
+								g_cur->keys.push_back(kv0[i].first);
+							break;
+						}
+				}
+				g_cur->recording = false;
+				g_cur->done = true;
+			}
+			g_cur = nullptr;
+		}
+
+		std::string SafeName(std::string n)
+		{
+			for (auto& ch : n)
+				if (std::strchr("\\/:*?\"<>|", ch)) ch = '_';
+			return n;
+		}
+		std::string SectionDir(const char* section) { return "Data/SKSE/Plugins/DeepFit/Presets/Sections/" + SafeName(g_sec.head) + "/" + SafeName(section); }
+
+		void Preset(Config& c, int which);
+
+		// the built-in set for this head: a head profile with its own defaults (Heads\Defaults) uses those as Default, and
+		// Subtle / Extreme as the same steps from it as the men's built-in ones take; any other head the men's built-in ones
+		void Builtin(Config& t, int which)
+		{
+			const std::string df = Config::defaultsFile(t.ownFile);
+			Config            d = t;
+			if (df.empty() || !d.loadFile(df, true)) {
+				Preset(t, which);
+				return;
+			}
+			if (which == 1) {
+				for (auto& [k, v] : d.keyValues(true))
+					t.applyKey(k, v);
+				return;
+			}
+			Config hs = t, hd = t, he = t;
+			Preset(hs, 0);
+			Preset(hd, 1);
+			Preset(he, 2);
+			const auto ks = hs.keyValues(true), kd = hd.keyValues(true), ke = he.keyValues(true), kD = d.keyValues(true);
+			for (std::size_t i = 0; i < kD.size() && i < kd.size(); ++i) {
+				std::string v = kD[i].second;
+				if (ks[i].second != kd[i].second || ke[i].second != kd[i].second) {
+					try {
+						const float s = std::stof(which == 0 ? ks[i].second : ke[i].second), m = std::stof(kd[i].second), mine = std::stof(kD[i].second);
+						char b[32];
+						std::snprintf(b, sizeof(b), "%.2f", std::fabs(m) > 1e-4f ? mine * s / m : s);
+						v = b;
+					} catch (...) {}
+				}
+				t.applyKey(kD[i].first, v);
+			}
+		}
+
+		void SectionPresets(const char* section, SectionInfo& s)
+		{
+			Config&    c = *g_sec.c;
+			SectionUI& ui = g_secUI[g_sec.head + "|" + section];
+			auto       take = [&](const Config& from) {
+                const auto kv = from.keyValues(true);
+                for (auto& [k, v] : kv)
+                    if (std::find(s.keys.begin(), s.keys.end(), k) != s.keys.end())
+                        c.applyKey(k, v);
+                g_secChanged = true;
+			};
+			ImGuiMCP::PushID(section);
+			ImGuiMCP::SetNextItemWidth(220.0f);
+			if (ImGuiMCP::BeginCombo(T("Section preset"), T("Choose..."))) {
+				if (!ui.looked) {
+					ui.looked = true;
+					ui.files.clear();
+					std::error_code ec;
+					for (auto it = std::filesystem::directory_iterator(SectionDir(section), ec); !ec && it != std::filesystem::directory_iterator(); it.increment(ec))
+						if (it->is_regular_file(ec) && it->path().extension() == ".ini")
+							ui.files.push_back(it->path().stem().string());
+				}
+				static const char* kB[] = { "Subtle", "Default", "Extreme" };
+				for (int i = 0; i < 3; ++i)
+					if (ImGuiMCP::Selectable(T(kB[i]))) {
+						Config t = c;
+						Builtin(t, i);
+						take(t);
+					}
+				if (!ui.files.empty())
+					ImGuiMCP::Separator();
+				for (auto& n : ui.files)
+					if (ImGuiMCP::Selectable(n.c_str())) {
+						Config t = c;
+						if (t.loadFile(SectionDir(section) + "/" + n + ".ini", true)) {
+							take(t);
+							logs::info("DeepFit: section preset \"{}\" ({}, {}) loaded", n, section, g_sec.head);
+						}
+					}
+				ImGuiMCP::EndCombo();
+			} else
+				ui.looked = false;
+			ImGuiMCP::SameLine();
+			ImGuiMCP::SetNextItemWidth(140.0f);
+			ImGuiMCP::InputText("##secname", ui.name, sizeof(ui.name));
+			ImGuiMCP::SameLine();
+			if (ImGuiMCP::SmallButton(T("Save section")) && ui.name[0]) {
+				std::error_code ec;
+				std::filesystem::create_directories(SectionDir(section), ec);
+				std::ofstream out(SectionDir(section) + "/" + SafeName(ui.name) + ".ini", std::ios::binary | std::ios::trunc);
+				out << "; DeepFit section preset - " << section << " (" << g_sec.head << ")\r\n";
+				for (auto& [k, v] : c.keyValues(true))
+					if (std::find(s.keys.begin(), s.keys.end(), k) != s.keys.end())
+						out << k << " = " << v << "\r\n";
+				logs::info("DeepFit: section preset \"{}\" ({}, {}) saved", ui.name, section, g_sec.head);
+				ui.name[0] = 0;
+				ui.looked = false;
+			}
+			Help("Sets just the sliders in this section: Subtle, Default or Extreme for this head (a head with its own defaults - the Argonian and Khajiit ones - starts from those), or one you saved. Type a name and press \"Save section\" to keep this section's sliders as a preset for this head, in Data\\SKSE\\Plugins\\DeepFit\\Presets\\Sections.");
+			ImGuiMCP::PopID();
+		}
+
+		bool Check(const char* label, bool* v) { Track(1, v); return ImGuiMCP::Checkbox(T(label), v); }
+		bool Slider(const char* label, float* v, float lo, float hi, const char* fmt) { Track(0, v); return ImGuiMCP::SliderFloat(T(label), v, lo, hi, T(fmt)); }
+		void Section(const char* t)
+		{
+			FinishSection();
+			ImGuiMCP::SeparatorText(T(t));
+			if (!g_sec.c)
+				return;
+			auto& s = g_secs[std::to_string(reinterpret_cast<std::uintptr_t>(g_sec.body)) + "|" + t];
+			g_cur = &s;
+			if (!s.done) {
+				s.recording = true;
+				s.offs.clear();
+				return;
+			}
+			if (!s.keys.empty())
+				SectionPresets(t, s);
+		}
+		// a page's body drawn for one head: its sections get the drop-down
+		bool Body(bool (*body)(Config&, bool), Config& c, bool fem, const std::string& head)
+		{
+			g_sec = SectionCtx{ &c, head, reinterpret_cast<const void*>(body) };
+			g_secChanged = false;
+			bool ch = body(c, fem);
+			FinishSection();
+			g_sec = SectionCtx{};
+			return ch || g_secChanged;
+		}
 
 		// 0.4.0: presets - the throat and mouth sliders set together.
 		// 0.4.2: Default is Nick's tuned set; Subtle is a softer version of it, Extreme a stronger one (the teeth placement,
@@ -267,7 +466,7 @@ namespace DeepFit::Menu
 			if (ImGuiMCP::CollapsingHeader(T("Men's heads (human)"), ImGuiMCP::ImGuiTreeNodeFlags_DefaultOpen)) {
 				ImGuiMCP::TextDisabled("%s", T("Every man's head without a head profile below; saved to DeepFit.ini."));
 				ImGuiMCP::PushID("men");
-				if (body(m, false))
+				if (Body(body, m, false, "Men"))
 					m.save();
 				ImGuiMCP::PopID();
 			}
@@ -278,7 +477,7 @@ namespace DeepFit::Menu
 					ImGuiMCP::TextColored(ImGuiMCP::ImVec4{ 1.0f, 0.75f, 0.3f, 1.0f }, "%s", T("Women's heads are off - switch on \"Women's heads too\" on the Info page to use these."));
 				ImGuiMCP::TextDisabled("%s", T("Used for women whose head is built for DeepFit; saved to DeepFit_Female.ini."));
 				ImGuiMCP::PushID("female");
-				if (body(f, true))
+				if (Body(body, f, true, "Women"))
 					f.save();
 				ImGuiMCP::PopID();
 			}
@@ -295,8 +494,11 @@ namespace DeepFit::Menu
 				ImGuiMCP::TextDisabled("%s %s", T("Used for:"), who.empty() ? T("(nothing set - add Races or HeadMeshes to its file)") : who.c_str());
 				ImGuiMCP::TextDisabled("%s %s", T("Saved to"), std::filesystem::path(h.file).filename().string().c_str());
 				ImGuiMCP::PushID(static_cast<int>(1000 + i));
-				if (body(h.cfg, h.sex == 1))
+				if (Body(body, h.cfg, h.sex == 1, h.name + (h.sex == 1 ? " (women)" : "")))
 					h.cfg.save();
+				// 0.5.2: this head back to its own defaults (as shipped - Heads\Defaults - or as installed)
+				if (ImGuiMCP::SmallButton(T("This head back to its defaults")))
+					h.cfg.resetDefaults();
 				ImGuiMCP::PopID();
 			}
 		}
@@ -319,6 +521,8 @@ namespace DeepFit::Menu
 			ch |= Slider("Lower lip, at most", &c.lowerLipMax, 0.0f, 4.5f, "%.1f");
 			ch |= Slider("Lower lip up", &c.lowerLipUp, 0.0f, 3.0f, "%.2f");
 			Help("While the mouth is full the lower lip is pushed up this far (its middle fully, the sides a little less), closer round the shaft.");
+			ch |= Slider("Pull-out hold", &c.pullOutHold, 0.0f, 2.0f, "%.2f s");
+			Help("As he pulls back, only the thin tip of his schlong is between the lips for a moment: the mouth snapped shut onto it and open again (jerky). With this, the lips and jaw close no faster than this many seconds for the whole way - they still open at once round a thicker part. 0 = off; about 0.4-0.8 for a snout.");
 			ch |= Slider("Lips follow speed", &c.smoothSpeed, 4.0f, 40.0f, "%.0f");
 			Help("How fast the lips and jaw bones catch up with the shaft (per second). Lower is smoother on a shaft that is thicker in some places than others (a snout's lips jerked from one size to the next); higher sticks closer. Each head keeps its own.");
 			ch |= Slider("Smooth the lips", &c.lipSmooth, 0.0f, 1.0f, "%.2f");
@@ -334,6 +538,8 @@ namespace DeepFit::Menu
 			Help("As the jaw opens, the sides of the lower lip (between its middle and the corners) push out and down, so the opening is round instead of a diamond pinched in at the sides of the lower lip. 0 = off. Needs the 0.4.4 head morphs (DF_LowerLipRound).");
 			Section("Corners");
 			ch |= Slider("Corners, at most", &c.cornerMax, 0.0f, 2.5f, "%.1f");
+			ch |= Slider("Corners close onto the shaft", &c.cornerClose, 1.0f, 4.0f, "x%.2f");
+			Help("The corners of his mouth come in onto the sides of the shaft this many times harder. Raise it if the sides of the mouth stay open beside the shaft (the Khajiit's corner bones only carry a little of the lips, about 2.5 makes up for it). Needs \"Close in round a slim shaft\" above 0.");
 			ch |= Slider("Mouth opens to the sides", &c.mouthWideGain, 0.0f, 2.5f, "x%.2f");
 			Help("The corners of his mouth pull out to the sides to the schlong's width (DeepFit's DF_MouthWide morph), so the mouth opens wide round it instead of puckering.");
 			ch |= Slider("Corners out, at most", &c.mouthWideMax, 0.0f, 3.0f, "%.1f units");
@@ -419,6 +625,7 @@ namespace DeepFit::Menu
 			{
 				static const char* kTeeth[] = { "Off", "While the mouth is full", "The whole scene" };
 				ImGuiMCP::Text("%s", T("Move the teeth:"));
+				Track(2, &c.teethMove);
 				for (int i = 0; i < 3; ++i) {
 					ImGuiMCP::SameLine();
 					if (ImGuiMCP::RadioButton(T(kTeeth[i]), c.teethMove == i)) {
@@ -564,19 +771,19 @@ namespace DeepFit::Menu
 		{
 			auto& c = Config::get();
 			bool  ch = false;
-			ImGuiMCP::TextWrapped("%s", T("Note: only a beard the game animates - one that moves when he talks or makes faces - can follow the mouth. A static beard (one that never moves with his expressions) is a fixed mesh DeepFit cannot bend: it is listed below as static and stays as it is. \"Shave my beard for the scene\" hides it instead."));
+			ImGuiMCP::TextWrapped("%s", T("Note: only a beard the game animates - one that moves when he talks or makes faces - can follow the mouth. A static beard (one that never moves with his expressions) is a fixed mesh DeepFit cannot bend: it is listed below as static and stays as it is. \"Shave my beard for the scene\" hides it instead. A beard DeepFit has not seen before follows the mouth from the next game start (MFEE moves it, and reads its list when the game starts)."));
 			ImGuiMCP::Separator();
 			ch |= Check("Shave my beard for the scene", &c.beardShave);
 			Help("Your beard and moustache are hidden while a shaft is at your mouth in a scene, and come back after. Nothing is changed on your character (RaceMenu) - only hidden for the scene.");
 			ch |= Check("Beards follow the mouth", &c.beardFollow);
 			Help("A beard moves with the face under it: the moustache with the upper lip, the chin beard down with the jaw and lower lip, the sides with the corners - as far as DeepFit moves that part of the face (its morphs and lip bones). The beard's own expressions and lip sync play as before.");
 			ch |= Slider("How much they follow", &c.beardStrength, 0.0f, 1.5f, "x%.2f");
-			Help("1 = exactly as the face under it moves. Lower if a beard looks stretched, higher if it lags behind the lips.");
+			Help("1 = exactly as the face under it moves. Lower if a beard looks stretched, higher if it lags behind the lips. Takes effect from the next game start.");
 			ch |= Slider("Follow within", &c.beardReach, 0.5f, 8.0f, "%.1f units of the face");
-			Help("Beard this close to the face follows it fully; further out it follows less, and not at all past twice this. Raise it for long beards that should swing down with the jaw, lower it if hair far from the mouth moves.");
+			Help("Beard this close to the face follows it fully; further out it follows less, and not at all past twice this. Raise it for long beards that should swing down with the jaw, lower it if hair far from the mouth moves. Takes effect from the next game start.");
 			Section("Your beard");
 			ImGuiMCP::TextWrapped("%s", DeepFit::PlayerBeardText().c_str());
-			Help("What DeepFit found on your character: each facial hair part, and whether it can move (\"moves with his mouth\") or is static. Updated every few seconds.");
+			Help("What DeepFit found on your character: each facial hair part, and whether it follows the mouth now, will from the next game start, or cannot (static). Updated every few seconds.");
 			if (ch)
 				c.save();
 		}

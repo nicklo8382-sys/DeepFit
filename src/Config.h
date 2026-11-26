@@ -106,6 +106,8 @@ struct Config
 	float jawFollow = 1.0f;        // 0.5.1: a head's "Lower Jaw" bone drops this many times as far as the front of the lower lip has to
 	float jawFollowMax = 2.5f;     // 0.5.1: ... at most this far
 	float cornerCloseMax = -1.0f;  // 0.5.1: the corners close in round the shaft at most this far (below 0: as far as the lips, LipCloseMax)
+	float cornerClose = 1.0f;      // 0.5.2: the corners come in onto the shaft's sides this many times harder
+	float pullOutHold = 0.0f;      // 0.5.2: the mouth closes at most this slowly (seconds to close fully; 0 = off) - no snapping on the thin tip
 	float lipSmooth = 0.0f;        // 0.4.9: each lip's bones smoothed against their neighbours (0-1; snouts - no spikes at the sides)
 	float lowerLipClose = 1.0f;    // 0.4.9: the lower lip comes up onto the shaft this many times harder (a gap under a canine's shaft)
 	float upperJawDown = 0.0f;     // 0.4.7: a beast's upper snout tilted down onto the shaft (0-1 of its DF_UpperJawDown; 1 = 10 degrees)
@@ -148,7 +150,9 @@ struct Config
 	static bool    isLookKey(const std::string& k);
 	void           load();
 	void           save();            // 0.3.0: the in-game menu writes its changes back to DeepFit.ini (keeps the comments)
-	void           resetDefaults();   // 0.3.1: every setting back to as installed (the key and the debug log are kept)
+	void           resetDefaults();
+	// 0.5.2: a head profile's own defaults as shipped: Heads\Defaults\<its file name> (empty = none)
+	static std::string defaultsFile(const std::string& ownFile);   // 0.3.1: every setting back to as installed (the key and the debug log are kept)
 	bool           loadFile(const std::string& path, bool lookOnly);   // 0.4.4: a preset file too
 	bool           saveTo(const std::string& path, bool lookOnly) const;
 	void           applyKey(const std::string& k, const std::string& v);

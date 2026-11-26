@@ -2,6 +2,7 @@
 #include "Heads.h"
 #include <unordered_set>
 #include <mutex>
+#include <filesystem>
 
 Config& Config::get()
 {
@@ -23,7 +24,7 @@ static const std::unordered_set<std::string>& lookKeys()
 {
 	static const std::unordered_set<std::string> k{
 		"LipMargin", "LipDepthSlab", "LipLaneWidth", "UpperLipMax", "LowerLipMax", "CornerMax", "Stretch", "MinOpen", "MinCorner",
-		"LowerLipRound", "MouthExtra", "JawUnits", "LipUnits", "WidenUnits", "MorphMax", "LipCloseMax", "UpperLipDown", "UpperLipClose", "LowerLipClose", "LipSmooth", "CornerCloseMax", "LowerLipInward", "JawFollow", "JawFollowMax", "SmoothSpeed", "UpperJawDown", "LowerLipUp", "LipsAlongShaft",
+		"LowerLipRound", "MouthExtra", "JawUnits", "LipUnits", "WidenUnits", "MorphMax", "LipCloseMax", "UpperLipDown", "UpperLipClose", "LowerLipClose", "LipSmooth", "PullOutHold", "CornerClose", "CornerCloseMax", "LowerLipInward", "JawFollow", "JawFollowMax", "SmoothSpeed", "UpperJawDown", "LowerLipUp", "LipsAlongShaft",
 		"FollowAim", "AimRadius", "AimMaxDeg", "ThroatFrom", "ThroatFull", "ThroatShape", "ThroatBand", "ThroatFill", "ThroatRest",
 		"ThroatShapeGain", "ThroatShapeMax", "ThroatWideUnits", "ThroatWideExtra", "ThroatDetail", "ThroatMotion", "ThroatMotionLength",
 		"LipRound", "MouthWideGain", "MouthWideMax", "CornerOpen", "ThroatAxisFit", "CheekGain", "CheekMax", "CheekInner",
@@ -159,6 +160,8 @@ void Config::applyKey(const std::string& k, const std::string& v)
 		else if (k == "UpperLipClose") fl(upperLipClose);
 		else if (k == "LowerLipClose") fl(lowerLipClose);
 		else if (k == "LipSmooth") fl(lipSmooth);
+		else if (k == "PullOutHold") fl(pullOutHold);
+		else if (k == "CornerClose") fl(cornerClose);
 		else if (k == "CornerCloseMax") fl(cornerCloseMax);
 		else if (k == "LowerLipInward") fl(lowerLipInward);
 		else if (k == "JawFollow") fl(jawFollow);
@@ -261,7 +264,7 @@ std::vector<std::pair<std::string, std::string>> Config::keyValues(bool lookOnly
 		{ "ThroatShapeGain", f2(throatShapeGain) }, { "ThroatShapeMax", f2(throatShapeMax) }, { "ThroatWideUnits", f2(throatWideUnits) },
 		{ "ThroatWideExtra", f2(throatWideExtra) }, { "ThroatDetail", f2(throatDetail) },
 		{ "ThroatMotion", f2(throatMotion) }, { "ThroatMotionLength", f2(throatMotionLen) },
-		{ "TeethOpen", b2(teethOpen) }, { "LipCloseMax", f2(lipCloseMax) }, { "UpperLipDown", f2(upperLipDown) }, { "UpperLipClose", f2(upperLipClose) }, { "LowerLipClose", f2(lowerLipClose) }, { "LipSmooth", f2(lipSmooth) }, { "CornerCloseMax", f2(cornerCloseMax) }, { "LowerLipInward", f2(lowerLipInward) }, { "JawFollow", f2(jawFollow) }, { "JawFollowMax", f2(jawFollowMax) }, { "SmoothSpeed", f2(smoothSpeed) }, { "UpperJawDown", f2(upperJawDown) },
+		{ "TeethOpen", b2(teethOpen) }, { "LipCloseMax", f2(lipCloseMax) }, { "UpperLipDown", f2(upperLipDown) }, { "UpperLipClose", f2(upperLipClose) }, { "LowerLipClose", f2(lowerLipClose) }, { "LipSmooth", f2(lipSmooth) }, { "PullOutHold", f2(pullOutHold) }, { "CornerClose", f2(cornerClose) }, { "CornerCloseMax", f2(cornerCloseMax) }, { "LowerLipInward", f2(lowerLipInward) }, { "JawFollow", f2(jawFollow) }, { "JawFollowMax", f2(jawFollowMax) }, { "SmoothSpeed", f2(smoothSpeed) }, { "UpperJawDown", f2(upperJawDown) },
 		{ "LowerLipUp", f2(lowerLipUp) }, { "LowerLipRound", f2(lowerLipRound) }, { "LipsAlongShaft", b2(lipsAlongShaft) },
 		{ "ReadAfterPPA", b2(readAfterPpa) }, { "FollowAim", b2(followAim) }, { "AimRadius", f2(aimRadius) }, { "AimMaxDeg", f2(aimMaxDeg) },
 		{ "DetectShapes", b2(detectShapes) }, { "ShapeFlare", f2(shapeFlare) }, { "ShapeKnotOpen", f2(shapeKnotOpen) },
@@ -403,6 +406,14 @@ void Config::setRaceStrength(const std::string& a_race, float a_k)
 	raceStrength = s;
 }
 
+std::string Config::defaultsFile(const std::string& a_own)
+{
+	if (a_own.empty())
+		return {};
+	const std::filesystem::path p(a_own);
+	return (p.parent_path() / "Defaults" / p.filename()).string();
+}
+
 void Config::resetDefaults()
 {
 	const int  key = megaKey, mods = megaKeyMods;
@@ -413,6 +424,8 @@ void Config::resetDefaults()
 		Config d{};
 		for (auto& [k, v] : d.keyValues(true))
 			applyKey(k, v);
+		if (!ownFile.empty())   // 0.5.2: a head profile: its own defaults as shipped (Heads\Defaults), over those
+			loadFile(defaultsFile(ownFile), true);
 		save();
 		return;
 	}
