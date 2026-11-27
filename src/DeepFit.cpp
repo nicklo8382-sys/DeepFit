@@ -1607,7 +1607,8 @@ namespace
 				// 0.5.4: "Opening ease" - the other way: as the tip goes in, the jaw opens no faster than this (all the way
 				// in that many seconds), so it does not jump open in one frame
 				if (cfg.openEase > 0.0f && (m == 0 || m == 1 || m == 2 || m == kMouthWide) && want[m] > r.morph[m])
-					want[m] = std::min(want[m], r.morph[m] + 100.0f * delta / cfg.openEase);
+					// 0.5.7: faster the further behind it is (a thick part arriving pushed through the lips while it eased)
+					want[m] = std::min(want[m], r.morph[m] + 100.0f * delta / cfg.openEase * (1.0f + 3.0f * std::clamp((want[m] - r.morph[m]) / 100.0f, 0.0f, 1.0f)));
 				r.morph[m] += (want[m] - r.morph[m]) * km;
 			}
 			r.teeth = cfg.teethOpen && (through || inMouth);
@@ -1866,7 +1867,7 @@ namespace
 			for (int i = 0; i < r.nspecs(); ++i) {
 				const auto kd = r.specs[i].kind;
 				if (r.bones[i].valid && (kd == Kind::Jaw || kd == Kind::Lip || kd == Kind::Corner) && target[i] > r.bones[i].cur)
-					target[i] = std::min(target[i], r.bones[i].cur + 4.0f * delta / cfg.openEase);
+					target[i] = std::min(target[i], r.bones[i].cur + 4.0f * delta / cfg.openEase * (1.0f + 1.5f * std::max(target[i] - r.bones[i].cur, 0.0f)));   // 0.5.7: catches up when far behind
 			}
 		// smooth + apply
 		const float k = 1.0f - std::exp(-delta * cfg.smoothSpeed);
@@ -3331,6 +3332,14 @@ namespace
 			return;
 		}
 		const auto&       hb = r.beardHead;
+		// 0.5.6: his face read before the game had hung its skin on his bones ("0 vertices on DeepFit's bones" in the log,
+		// every other read): a .tri made then has none of the lip bones' morphs, and the file went back and forth between
+		// the two each time - whichever was there at the game start was the one used (a beard that stayed shut over his
+		// mouth). Not written until his face's bones are there
+		if (cfg.beardBones && hb.weighted == 0 && r.found > 0) {
+			b.state = "waiting for his face's bones";
+			return;
+		}
 		const float       reach = std::max(cfg.beardReach, 0.1f);
 		std::vector<char> out(src.begin(), src.begin() + 64);
 		out.insert(out.end(), src.begin() + 64, src.begin() + 64 + vBytes);                                  // vertices

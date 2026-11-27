@@ -94,6 +94,9 @@ namespace
 						try { dst[n++] = std::stof(trim(part)); } catch (...) {}
 					if (n == 3 && lk == "lowerlipat")
 						h.hasLips = true;
+				} else if (lk == "hidden") {   // 0.5.7
+					const std::string s = lower(v);
+					h.hidden = s == "1" || s == "true" || s == "yes";
 				} else if (lk == "sex") {
 					const std::string s = lower(v);
 					h.sex = s == "female" ? 1 : (s == "any" || s == "both") ? -1 : 0;

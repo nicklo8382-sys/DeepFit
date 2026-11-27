@@ -485,6 +485,8 @@ namespace DeepFit::Menu
 			auto& heads = Heads::All();
 			for (std::size_t i = 0; i < heads.size(); ++i) {
 				auto&       h = heads[i];
+				if (h.hidden)
+					continue;   // 0.5.7
 				std::string label = h.name + (h.sex == 1 ? std::string(T(" (women)")) : h.sex == -1 ? std::string(T(" (men and women)")) : std::string()) + "###head" + std::to_string(i);
 				if (!ImGuiMCP::CollapsingHeader(label.c_str()))
 					continue;
@@ -517,10 +519,9 @@ namespace DeepFit::Menu
 			ch |= Slider("Upper lip down", &c.upperLipDown, -2.0f, 3.0f, "%.2f");
 			Help("While the mouth is full the upper lip is pulled down this far (its middle fully, the sides a little less) - the lip-round morph peaks it up towards the nose. Below 0 it is lifted instead (a cat's muzzle rising off the shaft).");
 			ch |= Slider("Upper lip closes onto the shaft", &c.upperLipClose, 1.0f, 3.0f, "x%.2f");
+			Help("On a shallow stroke the thinner front of the shaft rides low in his mouth and the upper lip has further to come down. Its bones are only half weighted in the head, so they need to move about twice as far as the lip should: raise this if the upper lip floats above the shaft (2 = about right for SMP Head). Needs \"Close in round a slim shaft\" above 0.");
 			ch |= Slider("Upper jaw down (snouts)", &c.upperJawDown, 0.0f, 1.0f, "%.2f");
 			Help("A beast's whole upper snout tilts down onto the shaft as the jaw opens (1 = 10 degrees, about 1.8 units at the tip of an Argonian's). Only heads that have DeepFit's DF_UpperJawDown morph (the Argonian High Poly Head) - others ignore it.");
-			Help("On a shallow stroke the thinner front of the shaft rides low in his mouth and the upper lip has further to come down. Its bones are only half weighted in the head, so they need to move about twice as far as the lip should: raise this if the upper lip floats above the shaft (2 = about right for SMP Head). Needs \"Close in round a slim shaft\" above 0.");
-			ch |= Slider("Lower lip, at most", &c.lowerLipMax, 0.0f, 4.5f, "%.1f");
 			ch |= Slider("Lower lip up", &c.lowerLipUp, 0.0f, 3.0f, "%.2f");
 			Help("While the mouth is full the lower lip is pushed up this far (its middle fully, the sides a little less), closer round the shaft.");
 			ch |= Slider("Pull-out hold", &c.pullOutHold, 0.0f, 2.0f, "%.2f s");
@@ -932,6 +933,8 @@ namespace DeepFit::Menu
 				if (heads.empty())
 					ImGuiMCP::TextDisabled("%s", T("No head profiles - every head uses DeepFit's own bones and the settings above."));
 				for (auto& h : heads) {
+					if (h.hidden)
+						continue;   // 0.5.7
 					std::string who;
 					for (auto& r : h.races) who += (who.empty() ? "" : ", ") + r;
 					for (auto& m : h.meshes) who += (who.empty() ? "" : ", ") + m;

@@ -28,6 +28,7 @@ struct HeadProfile
 	bool                     hasLips = false;
 	float                    upperLipAt[3]{}, lowerLipAt[3]{};
 	float                    jawBoneDeg = 30.0f;
+	bool                     hidden = false;   // 0.5.7: "Hidden = 1" - still used, but not shown in the menu
 	Config                   cfg;          // its per-head settings (shared settings come from the main set)
 };
 
