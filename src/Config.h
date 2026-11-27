@@ -111,6 +111,9 @@ struct Config
 	float tonguePush = 1.0f;       // 0.5.4: DeepFit's mouths: the tongue pushed down by the shaft (0-1.5; 0 = it stays)
 	float tongueHeight = 1.0f;     //   ... how far its top is above the floor of the mouth
 	float tongueMax = 2.0f;        //   ... at most this far down
+	float tongueUp = 0.8f;         // 0.5.5: ... and up to the shaft at most this far (it stays on its underside)
+	float tongueLick = 0.6f;       // 0.5.5: ... licks forward along the shaft this far (0 = still)
+	float tongueLickRate = 1.2f;   //   ... this many times a second
 	bool  jawToUnderside = false;  // 0.5.4: the jaw opens to the shaft's underside below the lower lip, not its whole height (snouts)
 	float jawFitShaft = 0.0f;      // 0.5.3: the jaw bones fit the shaft's underside at their own depth (0-1; the front bends up onto a sloping shaft)
 	float cornerClose = 1.0f;      // 0.5.2: the corners come in onto the shaft's sides this many times harder

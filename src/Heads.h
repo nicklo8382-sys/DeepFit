@@ -22,6 +22,12 @@ struct HeadProfile
 	std::vector<HeadBone>    bones;        // bones it adds or changes (the rest keep DeepFit's own list)
 	float                    jawDrop = 4.1f;    // 0.4.6: how far his lower lip drops with the jaw fully open (units; the test centres in it)
 	int                      jawPhoneme = -1;   // 0.4.5: a head without DeepFit's morphs opens its jaw with this phoneme (BigAah = 1)
+	// 0.5.5: a head with no lip bones that opens with a skeleton jaw bone (a werewolf's): where its lips are (head-bone space),
+	// the jaw bone DeepFit turns, and how far at a full jaw (degrees)
+	std::string              jawBone;
+	bool                     hasLips = false;
+	float                    upperLipAt[3]{}, lowerLipAt[3]{};
+	float                    jawBoneDeg = 30.0f;
 	Config                   cfg;          // its per-head settings (shared settings come from the main set)
 };
 

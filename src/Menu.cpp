@@ -631,6 +631,10 @@ namespace DeepFit::Menu
 			ch |= Check("Hide his teeth during a scene", &c.teethHide);
 			ch |= Slider("Tongue pushed down by the shaft", &c.tonguePush, 0.0f, 1.5f, "x%.2f");
 			ch |= Slider("Tongue pushed down at most", &c.tongueMax, 0.0f, 4.0f, "%.1f units");
+			ch |= Slider("Tongue up to the shaft at most", &c.tongueUp, 0.0f, 2.0f, "%.1f units");
+			ch |= Slider("Tongue licks", &c.tongueLick, 0.0f, 2.0f, "%.1f units");
+			ch |= Slider("Licks a second", &c.tongueLickRate, 0.2f, 3.0f, "%.1f");
+			Help("The tongue stays on the underside of the shaft - pushed down by it, or up to it when it rides high - and licks forward along it, this far and this often, while the shaft is in his mouth. 0 = it lies still.");
 			Help("DeepFit's own mouths (the Argonian's): the floor and lower gums of the mouth go down and bend with the lower jaw bones, and the tongue is pushed down where the shaft lies on it. 0 = the tongue stays as it is.");
 			Help("His teeth and tongue (the parts named in TeethParts) are hidden while he is in a scene and shown again after. Beast heads have it on: their jaw drops further than their teeth go with it.");
 			{

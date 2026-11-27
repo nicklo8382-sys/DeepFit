@@ -220,9 +220,17 @@ namespace
 		std::vector<TeethHook> teethSlots;
 		// 0.5.4: DeepFit's mouths (six bones: head, teeth, three lower-jaw ones, tongue) - their lower gums and floor follow
 		// his lower jaw bones and the tongue is pushed down by the shaft; the mouth's own bones hang on these nodes of DeepFit's
-		NiPointer<NiNode>      mouthNodes[4];
+		NiPointer<NiNode>      mouthNodes[6];
+		// 0.5.5: a head that opens with a skeleton jaw bone (no lip bones): DeepFit's own lip markers and that bone
+		NiPointer<NiNode>      virtLips[2];
+		NiPointer<NiAVObject>  jawBone;
+		NiMatrix3              jawBase, jawSet;
+		bool                   jawSetValid = false;
+		float                  jawBoneDeg = 0.0f;
+		float                  jawSign = 0.0f;   // jaw front / mid / back, tongue, 0.5.5: upper lip, lower lip
+		bool                   tongueLicks = false;   // 0.5.5: the shaft is in his mouth - the tongue may lick
 		std::vector<TeethHook> mouthSlots;
-		float                  tongueWant = 0.0f, tongueCur = 0.0f, mouthScan = 0.0f;
+		float                  tongueWant = 0.0f, tongueCur = 0.0f, mouthScan = 0.0f, tongueFwd = 0.0f;
 		float                  teethK = 0.0f, teethScan = 0.0f;
 		NiPoint3               mouthC{ 0, 0, 0 };        // 0.4.0: the middle of his lips (world), and the test schlong's
 		float                  previewD = 0.0f, previewR = 1.3f;   // tip depth and thickness this frame
@@ -681,6 +689,46 @@ namespace
 			b.cur = 0.0f;
 			b.valid = true;
 		});
+		// 0.5.5: no lip bones, but a head profile that opens it with a skeleton jaw bone (a werewolf's): DeepFit's own two
+		// markers where its lips are, so the shaft is measured at its mouth, and the jaw bone turned open
+		if ((!r.bones[kUpperCenter].valid || !r.bones[kBottomCenter].valid) && r.profile >= 0) {
+			const auto& hp = Heads::All()[r.profile];
+			auto*       headNode = r.head->AsNode();
+			auto*       jaw = hp.jawBone.empty() ? nullptr : root->GetObjectByName(hp.jawBone.c_str());
+			if (hp.hasLips && headNode && jaw) {
+				const float* at[2] = { hp.upperLipAt, hp.lowerLipAt };
+				const int    idx[2] = { kUpperCenter, kBottomCenter };
+				for (int k = 0; k < 2; ++k) {
+					const char* nm = k ? "DF Lower Lip Marker" : "DF Upper Lip Marker";
+					NiPointer<NiNode> n;
+					for (auto& ch : headNode->GetChildren())   // (again after a rebuild: the one already there)
+						if (ch && ch->name.c_str() && std::strcmp(ch->name.c_str(), nm) == 0 && ch->AsNode())
+							n = NiPointer<NiNode>(ch->AsNode());
+					if (!n) {
+						n = NiPointer<NiNode>(NiNode::Create(0));
+						n->name = nm;
+						headNode->AttachChild(n.get(), true);
+					}
+					n->local = NiTransform();
+					n->local.translate = NiPoint3(at[k][0], at[k][1], at[k][2]);
+					n->world = r.head->world * n->local;
+					r.virtLips[k] = n;
+					auto& b = r.bones[idx[k]];
+					b.node = NiPointer<NiAVObject>(n.get());
+					b.parent = NiPointer<NiNode>(headNode);
+					b.restLocal = n->local.translate;
+					b.cur = 0.0f;
+					b.valid = true;
+				}
+				r.found = std::max(r.found, 2);
+				r.jawBone = NiPointer<NiAVObject>(jaw);
+				r.jawBoneDeg = hp.jawBoneDeg;
+				r.jawSetValid = false;
+				r.jawSign = 0.0f;
+				logs::info("DeepFit: receiver {:08X} opens with its jaw bone ({}) - no lip bones", actor->GetFormID(), hp.jawBone);
+				return &r;
+			}
+		}
 		if (r.found == 0 || !r.bones[kUpperCenter].valid || !r.bones[kBottomCenter].valid) {
 			if (Config::get().debugLog && actor->IsPlayerRef())
 				logs::info("DeepFit: player head found but only {} mouth bones matched (need Upper/Bottom Lip Center)", r.found);
@@ -1740,7 +1788,7 @@ namespace
 					float          zMin = 1e9f;
 					int            hits = 0;
 					for (auto& p : hs) {
-						if (std::fabs(p.y - rh.y) > cfg.lipDepthSlab * 1.5f || std::fabs(p.x - rh.x) > cfg.lipLaneWidth * 2.0f)
+						if (std::fabs(p.y - rh.y) > cfg.lipDepthSlab * 2.5f || std::fabs(p.x - rh.x) > cfg.lipLaneWidth * 2.0f)   // (0.5.5: wider - a ring of the shaft's mesh coming and going made the jaw flicker)
 							continue;
 						if (p.z < rh.z - cfg.jawFollowMax - 6.0f)
 							continue;   // far below anything the jaw could reach
@@ -1760,6 +1808,7 @@ namespace
 		// 0.5.4: the tongue (DeepFit's mouths): pushed down as far as the shaft's underside is below its top, between the
 		// middle and the front of the lower jaw
 		r.tongueWant = 0.0f;
+		r.tongueLicks = false;
 		if (cfg.tonguePush > 0.0f && DeepFit::MouthNow() && inMouth) {
 			int jf = -1, jm = -1;
 			for (int i = 0; i < r.nspecs(); ++i)
@@ -1781,7 +1830,9 @@ namespace
 					// the floor here after the jaw morph and the jaw bones, and the tongue lying on it
 					const float drop = std::clamp(r.morph[0] / 100.0f, 0.0f, 1.0f) * headJawDrop(r) * 0.75f + 0.5f * (target[jf] + target[jm]) * 0.9f;
 					const float top = rh.z - drop + cfg.tongueHeight;
-					r.tongueWant = std::clamp((top - (zMin - cfg.lipMargin)) * cfg.tonguePush, 0.0f, cfg.tongueMax);
+					// (0.5.5: and up to it, when the shaft is above it - the tongue stays on the shaft's underside)
+					r.tongueWant = std::clamp((top - (zMin - cfg.lipMargin)) * cfg.tonguePush, -cfg.tongueUp, cfg.tongueMax);
+					r.tongueLicks = true;
 				}
 			}
 		}
@@ -1797,10 +1848,14 @@ namespace
 				if (r.bones[i].valid && (kd == Kind::Lip || kd == Kind::Corner || kd == Kind::Jaw) && target[i] < r.bones[i].cur)
 					target[i] = std::max(target[i], r.bones[i].cur - 4.0f * delta / cfg.pullOutHold);
 			}
-		if (cfg.openEase > 0.0f)   // 0.5.4: and the jaw bones open no faster than "Opening ease"
-			for (int i = 0; i < r.nspecs(); ++i)
-				if (r.bones[i].valid && r.specs[i].kind == Kind::Jaw && target[i] > r.bones[i].cur)
+		// 0.5.4: and the jaw bones open no faster than "Opening ease"; 0.5.5: the lips and corners too - going back in, the
+		// tip reaching his lips made every lip jump open to "Lips open at least" in one frame (the jerk at the start of each stroke)
+		if (cfg.openEase > 0.0f)
+			for (int i = 0; i < r.nspecs(); ++i) {
+				const auto kd = r.specs[i].kind;
+				if (r.bones[i].valid && (kd == Kind::Jaw || kd == Kind::Lip || kd == Kind::Corner) && target[i] > r.bones[i].cur)
 					target[i] = std::min(target[i], r.bones[i].cur + 4.0f * delta / cfg.openEase);
+			}
 		// smooth + apply
 		const float k = 1.0f - std::exp(-delta * cfg.smoothSpeed);
 		// 0.4.5: a low-poly shaft: the lips ease more slowly (its few vertices step from frame to frame)
@@ -2256,13 +2311,39 @@ namespace
 			r.mouthNodes[k]->local = NiTransform();
 			r.mouthNodes[k]->local.translate = d;
 		}
-		// the tongue: down (his face's down, in head-bone space), eased
+		// 0.5.5: the edges of the palate and the floor of his mouth follow his upper and lower lips (they were left behind
+		// when the lip bones pushed the lips out - a see-through gap between the lips and the inside of the mouth)
+		{
+			static const char* kUp[] = { "Upper Lip Center", "Upper Lip Left", "Upper Lip Right", "Muzzle Upper Left", "Muzzle Upper Right" };
+			static const char* kLo[] = { "Bottom Lip Center", "Bottom Lip Left", "Bottom Lip Right", "Muzzle Lower Left", "Muzzle Lower Right", "Muzzle Jaw Left", "Muzzle Jaw Right" };
+			auto avg = [&](const char* const* names, std::size_t n) {
+				NiPoint3 sum;
+				int      k = 0;
+				for (std::size_t q = 0; q < n; ++q)
+					for (int i = 0; i < r.nspecs(); ++i)
+						if (r.specs[i].name == names[q] && r.bones[i].valid && r.bones[i].node) {
+							sum += r.bones[i].node->local.translate - r.bones[i].restLocal;
+							++k;
+							break;
+						}
+				return k ? sum * (1.0f / static_cast<float>(k)) : NiPoint3();
+			};
+			r.mouthNodes[4]->local = NiTransform();
+			r.mouthNodes[4]->local.translate = avg(kUp, std::size(kUp));
+			r.mouthNodes[5]->local = NiTransform();
+			r.mouthNodes[5]->local.translate = avg(kLo, std::size(kLo));
+		}
+		// the tongue: on the shaft's underside (down, or up to it), and - 0.5.5 - licking forward along it now and then
 		r.tongueCur += (r.tongueWant - r.tongueCur) * (1.0f - std::exp(-delta * 10.0f));
 		{
+			const auto& cfgT = cfgOf(r);
+			const float want = r.tongueLicks && cfgT.tongueLick > 0.0f ?
+			                       cfgT.tongueLick * 0.5f * (1.0f + std::sin(static_cast<float>(g_clock) * 2.0f * 3.14159f * cfgT.tongueLickRate)) : 0.0f;
+			r.tongueFwd += (want - r.tongueFwd) * (1.0f - std::exp(-delta * 8.0f));
 			const NiTransform& H = r.head->world;
 			const float        hs = H.scale > 1e-6f ? H.scale : 1.0f;
 			r.mouthNodes[3]->local = NiTransform();
-			r.mouthNodes[3]->local.translate = (H.rotate.Transpose() * (r.fz * -r.tongueCur)) * (1.0f / hs);
+			r.mouthNodes[3]->local.translate = (H.rotate.Transpose() * (r.fz * -r.tongueCur + r.fy * r.tongueFwd)) * (1.0f / hs);
 		}
 		for (auto& n : r.mouthNodes)
 			n->world = r.head->world * n->local;
@@ -2277,14 +2358,15 @@ namespace
 		traverse(root, [&](NiAVObject* o) {
 			auto* geo = o ? o->AsGeometry() : nullptr;
 			auto* si = geo ? geo->GetGeometryRuntimeData().skinInstance.get() : nullptr;
-			if (!si || !si->skinData || !si->bones || !si->boneWorldTransforms || si->skinData->bones != 6)
+			const std::uint32_t nb = si && si->skinData ? si->skinData->bones : 0;
+			if (!si || !si->skinData || !si->bones || !si->boneWorldTransforms || (nb != 6 && nb != 8))
 				return;
 			auto onHead = [&](NiAVObject* b) {
 				return b && (b == r.head.get() || (b->name.c_str() && std::strcmp(b->name.c_str(), "NPC Head [Head]") == 0));
 			};
 			if (!onHead(si->bones[0]))
 				return;
-			for (std::uint32_t i = 2; i < 6; ++i) {
+			for (std::uint32_t i = 2; i < nb; ++i) {
 				NiNode* want = r.mouthNodes[i - 2].get();
 				if (si->bones[i] == want)
 					continue;
@@ -2295,6 +2377,49 @@ namespace
 					logs::info("DeepFit: {} - its lower gums follow his jaw bones and its tongue the shaft", geo->name.c_str() ? geo->name.c_str() : "?");
 			}
 		});
+	}
+
+	// 0.5.5: a head with a skeleton jaw bone: the bone turned open as far as DeepFit's jaw opening says (at 100: its
+	// head profile's JawBoneDeg), on top of where the animation put it this frame; which way opens is found once (the
+	// way that takes the front of the jaw down)
+	void turnJaw(Receiver& r)
+	{
+		auto* jaw = r.jawBone.get();
+		if (!jaw || !jaw->parent || !r.head)
+			return;
+		// the animation's own pose this frame (it may not set the jaw every frame - then ours is still there)
+		if (!r.jawSetValid || !(jaw->local.rotate == r.jawSet))
+			r.jawBase = jaw->local.rotate;
+		const float open = std::clamp(r.morph[0] / 100.0f, 0.0f, 1.5f) * r.jawBoneDeg * 0.0174533f;
+		auto turned = [&](float a) {
+			// about his face's right axis, in the jaw bone's parent space
+			const NiMatrix3& PR = jaw->parent->world.rotate;
+			NiPoint3         ax = PR.Transpose() * r.fx;
+			ax = norm(ax);
+			const float c = std::cos(a), s = std::sin(a), t = 1.0f - c;
+			NiMatrix3   R;
+			R.entry[0][0] = t * ax.x * ax.x + c;        R.entry[0][1] = t * ax.x * ax.y - s * ax.z; R.entry[0][2] = t * ax.x * ax.z + s * ax.y;
+			R.entry[1][0] = t * ax.x * ax.y + s * ax.z; R.entry[1][1] = t * ax.y * ax.y + c;        R.entry[1][2] = t * ax.y * ax.z - s * ax.x;
+			R.entry[2][0] = t * ax.x * ax.z - s * ax.y; R.entry[2][1] = t * ax.y * ax.z + s * ax.x; R.entry[2][2] = t * ax.z * ax.z + c;
+			return R * r.jawBase;
+		};
+		if (r.jawSign == 0.0f) {   // which way is open: the jaw's front (towards his lips) goes down
+			const NiPoint3 lips = r.bones[kBottomCenter].valid ? r.bones[kBottomCenter].parent->world * r.bones[kBottomCenter].restLocal : r.head->world.translate;
+			const NiPoint3 local = jaw->world.rotate.Transpose() * (lips - jaw->world.translate) * (1.0f / std::max(jaw->world.scale, 1e-6f));
+			const NiTransform& P = jaw->parent->world;
+			auto frontZ = [&](float a) {
+				NiTransform t = jaw->local;
+				t.rotate = turned(a);
+				const NiTransform w = P * t;
+				return dot(w * local, r.fz);
+			};
+			r.jawSign = frontZ(0.3f) < frontZ(-0.3f) ? 1.0f : -1.0f;
+		}
+		jaw->local.rotate = turned(open * r.jawSign);
+		r.jawSet = jaw->local.rotate;
+		r.jawSetValid = true;
+		NiUpdateData ud{};
+		jaw->Update(ud);
 	}
 
 	void hideTeeth(Receiver& r, Actor* act, float delta)
@@ -2411,7 +2536,7 @@ namespace
 					// 0.5.3: DeepFit's mouths have exactly two bones (his head, then the teeth): the teeth's one is re-hung
 					// whatever the game made of it (on the Argonian's it was neither his head bone nor found by name - the
 					// whole mouth, tongue and all, was hidden again)
-					const bool rig = si->skinData->bones == 6;   // 0.5.4: a rigged mouth - only its teeth slot (1) here
+					const bool rig = si->skinData->bones == 6 || si->skinData->bones == 8;   // 0.5.4: a rigged mouth - only its teeth slot (1) here
 					const bool ours = si->skinData->bones == 2 || rig;
 					if (cfg.debugLog) {
 						std::string names;
@@ -3885,7 +4010,7 @@ void DeepFit::OnFrame(float delta)
 				}
 				for (auto& h : r.mouthSlots) {   // 0.5.4
 					auto* si = h.geo ? h.geo->GetGeometryRuntimeData().skinInstance.get() : nullptr;
-					if (si && si->bones && si->skinData && h.idx < si->skinData->bones && h.orig && h.idx >= 2 && h.idx < 6 &&
+					if (si && si->bones && si->skinData && h.idx < si->skinData->bones && h.orig && h.idx >= 2 && h.idx < 8 &&
 						si->bones[h.idx] == r.mouthNodes[h.idx - 2].get()) {
 						si->bones[h.idx] = h.orig.get();
 						si->boneWorldTransforms[h.idx] = &h.orig->world;
@@ -3954,12 +4079,30 @@ void DeepFit::OnFrame(float delta)
 	for (auto* recv : actors) {
 		if (cfg.malesOnly) {   // 0.3.7: only men's mouths (a woman's SMP Head is left to its own physics and PPA)
 			auto* base = recv->GetActorBase();
-			if (!base || base->GetSex() != SEX::kMale)
+			if (!base || base->GetSex() != SEX::kMale) {
+				static std::unordered_set<FormID> toldSkip;   // 0.5.5: say so once (a woman's mouth never opening looked like a bug)
+				if (cfg.debugLog && toldSkip.insert(recv->GetFormID()).second)
+					logs::info("DeepFit: {:08X} ({}) is a woman - not fitted while \"Women's heads too\" is off", recv->GetFormID(), recv->GetDisplayFullName());
 				continue;
+			}
 		}
 		auto* r = getReceiver(recv, delta);
-		if (!r)
+		if (!r) {
+			// 0.5.5: once a minute, who has no mouth DeepFit can fit and why (race, face mesh) - not only the player
+			static std::unordered_map<FormID, double> toldNo;
+			auto& t = toldNo[recv->GetFormID()];
+			if (cfg.debugLog && g_clock - t > 60.0) {
+				t = g_clock;
+				std::string race, mesh;
+				if (auto* rc = recv->GetRace(); rc && rc->GetFormEditorID())
+					race = rc->GetFormEditorID();
+				if (auto* base = recv->GetActorBase())
+					if (auto* hp = base->GetCurrentHeadPartByType(BGSHeadPart::HeadPartType::kFace); hp && hp->GetModel())
+						mesh = hp->GetModel();
+				logs::info("DeepFit: {:08X} ({}) race {} head {} - no mouth bones DeepFit can fit", recv->GetFormID(), recv->GetDisplayFullName(), race, mesh);
+			}
 			continue;
+		}
 		{   // 0.4.4: a woman's head (built for DeepFit) uses the women's settings
 			auto* base = recv->GetActorBase();
 			r->female = base && base->GetSex() == SEX::kFemale;
@@ -4020,6 +4163,7 @@ void DeepFit::OnFrame(float delta)
 		else
 			solve(*r, shaft, delta);
 		sendMouth(*r, delta);
+		turnJaw(*r);   // 0.5.5
 		soundsFor(*r, recv);   // 0.4.4
 		updateTeeth(*r, recv, delta);
 		hideTeeth(*r, recv, delta);
@@ -4050,6 +4194,14 @@ void DeepFit::OnFrame(float delta)
 	if (cfg.debugLog && heartbeat > 5.0f) {
 		heartbeat = 0.0f;
 		logs::info("DeepFit: alive - {} actors, {} with mouth bones, {} shaft verts in range", actors.size(), nRecv, nShaft);
+		static double namesAt = -1e9;   // 0.5.5: and who they are, once a minute
+		if (g_clock - namesAt > 60.0) {
+			namesAt = g_clock;
+			std::string who;
+			for (auto* a : actors)
+				who += std::format("{}{:08X} {}", who.empty() ? "" : ", ", a->GetFormID(), a->GetDisplayFullName() ? a->GetDisplayFullName() : "?");
+			logs::info("DeepFit: actors looked at: {}", who);
+		}
 	}
 	if (g_logTimer > 1.0f)
 		g_logTimer = 0.0f;

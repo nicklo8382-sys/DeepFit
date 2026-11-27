@@ -81,6 +81,19 @@ namespace
 					for (int i = 0; i < 16; ++i)
 						if (ph == kPh[i])
 							h.jawPhoneme = i;
+				} else if (lk == "jawbone") {   // 0.5.5
+					h.jawBone = v;
+				} else if (lk == "jawbonedeg") {
+					try { h.jawBoneDeg = std::stof(v); } catch (...) {}
+				} else if (lk == "upperlipat" || lk == "lowerlipat") {
+					float*            dst = lk == "upperlipat" ? h.upperLipAt : h.lowerLipAt;
+					std::stringstream ss(v);
+					std::string       part;
+					int               n = 0;
+					while (n < 3 && std::getline(ss, part, ','))
+						try { dst[n++] = std::stof(trim(part)); } catch (...) {}
+					if (n == 3 && lk == "lowerlipat")
+						h.hasLips = true;
 				} else if (lk == "sex") {
 					const std::string s = lower(v);
 					h.sex = s == "female" ? 1 : (s == "any" || s == "both") ? -1 : 0;
