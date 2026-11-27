@@ -67,7 +67,16 @@ namespace
 	constexpr int kUpperCenter = 0;
 	constexpr int kBottomCenter = 3;
 	constexpr int kNumSpecs = static_cast<int>(sizeof(kSpecs) / sizeof(kSpecs[0]));
-	constexpr int kMaxSpecs = 48;   // 0.4.6: DeepFit's own bones plus what a head profile adds
+	constexpr int kMaxSpecs = 48;
+	// 0.5.6: a rigged mouth with 24 bones: bones 8-23 copy how far each of these of his head's own bones moved, so the
+	// edge of the mouth (where it meets his lips, cheeks and jaw) moves exactly as his lips do - with the two averaged
+	// lip bones the palate's front came away from his upper lip and the floor of his mouth stuck out under his lower lip
+	const char* const kMouthRim[] = { "Upper Lip Center", "Upper Lip Left", "Upper Lip Right", "Bottom Lip Center", "Bottom Lip Left",
+		"Bottom Lip Right", "Corner Lip Left", "Corner Lip Right", "Muzzle Upper Left", "Muzzle Upper Right", "Muzzle Lower Left",
+		"Muzzle Lower Right", "Muzzle Jaw Left", "Muzzle Jaw Right", "Cheeck Side L", "Cheeck Side R" };
+	constexpr int kMouthRimN = static_cast<int>(sizeof(kMouthRim) / sizeof(kMouthRim[0]));
+	constexpr int kMouthNodes = 6 + kMouthRimN;
+	constexpr bool rigMouthBones(std::uint32_t nb) { return nb == 6 || nb == 8 || nb == 8 + kMouthRimN; }   // 0.4.6: DeepFit's own bones plus what a head profile adds
 
 	// 0.5.4: the lips are mostly moved by DeepFit's bones, not its morphs - a beard following only the morphs stayed where
 	// the lips were pushed out of it (the moustache sank into the upper lip, the chin beard into the lower). Each lip bone
@@ -220,7 +229,7 @@ namespace
 		std::vector<TeethHook> teethSlots;
 		// 0.5.4: DeepFit's mouths (six bones: head, teeth, three lower-jaw ones, tongue) - their lower gums and floor follow
 		// his lower jaw bones and the tongue is pushed down by the shaft; the mouth's own bones hang on these nodes of DeepFit's
-		NiPointer<NiNode>      mouthNodes[6];
+		NiPointer<NiNode>      mouthNodes[kMouthNodes];
 		// 0.5.5: a head that opens with a skeleton jaw bone (no lip bones): DeepFit's own lip markers and that bone
 		NiPointer<NiNode>      virtLips[2];
 		NiPointer<NiAVObject>  jawBone;
@@ -1223,7 +1232,10 @@ namespace
 			r.previewD = D;
 			r.previewR = 0.5f * (T + W);
 			r.previewShape = pshape;
-			for (float sIn = -3.0f; sIn <= D; sIn += 0.25f) {
+			// 0.5.6: the rings counted back from the tip - counted from a fixed start, the last ring (its tip) moved in
+			// 0.25 steps as it slid in and out, and the jaw, tongue, lips and his eyes stepped with it (a twitch at the
+			// slow ends of a stroke)
+			for (float sIn = D; sIn >= -3.0f; sIn -= 0.25f) {
 				const float k = previewProfile(sIn, D, pshape);
 				const float tipK = std::sqrt(std::clamp((D - sIn) / 0.8f, 0.0f, 1.0f));   // the rounded tip
 				const float rz = T * k * std::max(tipK, 0.15f), rx = W * k * std::max(tipK, 0.15f);
@@ -2332,6 +2344,10 @@ namespace
 			r.mouthNodes[4]->local.translate = avg(kUp, std::size(kUp));
 			r.mouthNodes[5]->local = NiTransform();
 			r.mouthNodes[5]->local.translate = avg(kLo, std::size(kLo));
+			for (int q = 0; q < kMouthRimN; ++q) {   // 0.5.6: each of his lip bones on its own
+				r.mouthNodes[6 + q]->local = NiTransform();
+				r.mouthNodes[6 + q]->local.translate = avg(&kMouthRim[q], 1);
+			}
 		}
 		// the tongue: on the shaft's underside (down, or up to it), and - 0.5.5 - licking forward along it now and then
 		r.tongueCur += (r.tongueWant - r.tongueCur) * (1.0f - std::exp(-delta * 10.0f));
@@ -2359,7 +2375,7 @@ namespace
 			auto* geo = o ? o->AsGeometry() : nullptr;
 			auto* si = geo ? geo->GetGeometryRuntimeData().skinInstance.get() : nullptr;
 			const std::uint32_t nb = si && si->skinData ? si->skinData->bones : 0;
-			if (!si || !si->skinData || !si->bones || !si->boneWorldTransforms || (nb != 6 && nb != 8))
+			if (!si || !si->skinData || !si->bones || !si->boneWorldTransforms || !rigMouthBones(nb))
 				return;
 			auto onHead = [&](NiAVObject* b) {
 				return b && (b == r.head.get() || (b->name.c_str() && std::strcmp(b->name.c_str(), "NPC Head [Head]") == 0));
@@ -2536,7 +2552,7 @@ namespace
 					// 0.5.3: DeepFit's mouths have exactly two bones (his head, then the teeth): the teeth's one is re-hung
 					// whatever the game made of it (on the Argonian's it was neither his head bone nor found by name - the
 					// whole mouth, tongue and all, was hidden again)
-					const bool rig = si->skinData->bones == 6 || si->skinData->bones == 8;   // 0.5.4: a rigged mouth - only its teeth slot (1) here
+					const bool rig = rigMouthBones(si->skinData->bones);   // 0.5.4: a rigged mouth - only its teeth slot (1) here
 					const bool ours = si->skinData->bones == 2 || rig;
 					if (cfg.debugLog) {
 						std::string names;
@@ -3357,12 +3373,30 @@ namespace
 		if (cfg.beardBones && !hb.bw.empty() && r.head) {
 			const NiTransform& H = r.head->world;
 			const float        hs = H.scale > 1e-6f ? H.scale : 1.0f;
+			// (0.5.5: his face's axes worked out here from his head, as the fitting does - r.fx/fy/fz are only set once the
+			// mouth has been fitted, and before that pointed the world's way: each game start wrote a different .tri, so the
+			// beard always waited for "the next game start" and moved the wrong way meanwhile)
+			NiPoint3 FX = norm(H.rotate * NiPoint3(1, 0, 0));
+			if (r.bones[6].valid && r.bones[7].valid) {
+				const NiPoint3 across = (r.bones[7].parent->world * r.bones[7].restLocal) - (r.bones[6].parent->world * r.bones[6].restLocal);
+				if (len(across) > 0.05f)
+					FX = norm(across);
+			}
+			NiPoint3 FF = r.hmag ? r.hmag->world.translate - H.translate : H.rotate * NiPoint3(0, 1, 0);
+			FF = FF - FX * dot(FF, FX);
+			const NiPoint3 FY = len(FF) > 0.01f ? norm(FF) : norm(H.rotate * NiPoint3(0, 1, 0));
+			NiPoint3       FZ = norm(NiPoint3(FX.y * FY.z - FX.z * FY.y, FX.z * FY.x - FX.x * FY.z, FX.x * FY.y - FX.y * FY.x));
+			if (r.bones[kUpperCenter].valid && r.bones[kBottomCenter].valid &&
+				dot((r.bones[kUpperCenter].parent->world * r.bones[kUpperCenter].restLocal) - (r.bones[kBottomCenter].parent->world * r.bones[kBottomCenter].restLocal), FZ) < 0.0f) {
+				FX = FX * -1.0f;
+				FZ = FZ * -1.0f;
+			}
 			for (int sp = 0; sp < r.nspecs() && sp < kMaxSpecs; ++sp) {
 				const auto kd = r.specs[sp].kind;
 				if (kd != Kind::Lip && kd != Kind::Corner && kd != Kind::Jaw)
 					continue;
 				const NiPoint3 dn = norm(r.specs[sp].dir);
-				const NiPoint3 world = r.fx * dn.x + r.fy * dn.y + r.fz * dn.z;
+				const NiPoint3 world = FX * dn.x + FY * dn.y + FZ * dn.z;
 				NiPoint3       headDir = (H.rotate.Transpose() * world) * (1.0f / hs);   // 1 unit in the world, in head-bone space
 				// (rounded: the face axes wobble a hair from frame to frame - the .tri would differ every time it is made)
 				headDir = NiPoint3(std::round(headDir.x * 50.0f) / 50.0f, std::round(headDir.y * 50.0f) / 50.0f, std::round(headDir.z * 50.0f) / 50.0f);
@@ -3635,21 +3669,30 @@ namespace
 		if (L < 1.0f || lv < 1.0f || lv > L * 1.8f + 4.0f)
 			return why("his lips are too far from the base of his schlong (distance / its length)", lv, L);
 		const float t = dot(v, d) / (L * L);
-		if (t < 0.3f)
-			return why("his lips are behind or beside the base of his schlong (share along it)", t, 0.3f);
+		if (t < 0.15f)
+			return why("his lips are behind or beside the base of his schlong (share along it)", t, 0.15f);
 		const NiPoint3 perpV = v - d * t;
 		if (len(perpV) > cfg.aimRadius)
 			return why("its line passes too far from his lips (units / \"Aim when it passes within\")", len(perpV), cfg.aimRadius);
+		// 0.5.6: how much of the turn it gets fades in and out near each limit - it was all or nothing, and deep in (his
+		// lips near the base: the share along it about 0.3) it switched on and off from frame to frame: the schlong jumped
+		// between the animation's aim and his lips, and his lips opened and snapped shut with it
+		auto ramp = [](float x) { x = std::clamp(x, 0.0f, 1.0f); return x * x * (3.0f - 2.0f * x); };
+		float share = ramp((t - 0.15f) / 0.2f) * ramp((cfg.aimRadius - len(perpV)) / std::max(cfg.aimRadius * 0.25f, 0.1f));
 		const NiPoint3 a = norm(d), b = norm(v);
 		NiPoint3       ax(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x);
 		const float    s = len(ax), c = dot(a, b);
 		const float    ang = std::atan2(s, c);
 		if (ang > cfg.aimMaxDeg * 0.01745329f)
 			return why("it would have to turn too far (degrees / \"Turn it at most\")", ang * 57.29578f, cfg.aimMaxDeg);
-		if (s < 1e-5f || ang < 0.003f)
+		{
+			const float maxR = cfg.aimMaxDeg * 0.01745329f;
+			share *= ramp((maxR - ang) / std::max(maxR * 0.25f, 0.01f));
+		}
+		if (s < 1e-5f || ang * share < 0.003f)
 			return;
 		ax = ax * (1.0f / s);
-		const float cs = std::cos(ang), sn = std::sin(ang);
+		const float cs = std::cos(ang * share), sn = std::sin(ang * share);
 		for (auto& q : pts) {   // Rodrigues, about B
 			const NiPoint3 r = q - B;
 			const NiPoint3 k(ax.y * r.z - ax.z * r.y, ax.z * r.x - ax.x * r.z, ax.x * r.y - ax.y * r.x);
@@ -4010,7 +4053,7 @@ void DeepFit::OnFrame(float delta)
 				}
 				for (auto& h : r.mouthSlots) {   // 0.5.4
 					auto* si = h.geo ? h.geo->GetGeometryRuntimeData().skinInstance.get() : nullptr;
-					if (si && si->bones && si->skinData && h.idx < si->skinData->bones && h.orig && h.idx >= 2 && h.idx < 8 &&
+					if (si && si->bones && si->skinData && h.idx < si->skinData->bones && h.orig && h.idx >= 2 && h.idx < 2 + kMouthNodes &&
 						si->bones[h.idx] == r.mouthNodes[h.idx - 2].get()) {
 						si->bones[h.idx] = h.orig.get();
 						si->boneWorldTransforms[h.idx] = &h.orig->world;
