@@ -38,7 +38,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 {
 	SKSE::Init(a_skse);
 	SetupLog();
-	logs::info("DeepFit 0.5.7 loading");
+	logs::info("DeepFit 0.5.8 loading");
 	Config::get().load();
 	if (auto* msg = SKSE::GetMessagingInterface())
 		msg->RegisterListener(MessageHandler);

@@ -67,7 +67,7 @@ namespace
 	constexpr int kUpperCenter = 0;
 	constexpr int kBottomCenter = 3;
 	constexpr int kNumSpecs = static_cast<int>(sizeof(kSpecs) / sizeof(kSpecs[0]));
-	constexpr int kMaxSpecs = 48;
+	constexpr int kMaxSpecs = 48;   // 0.4.6: DeepFit's own bones plus what a head profile adds
 	// 0.5.6: a rigged mouth with 24 bones: bones 8-23 copy how far each of these of his head's own bones moved, so the
 	// edge of the mouth (where it meets his lips, cheeks and jaw) moves exactly as his lips do - with the two averaged
 	// lip bones the palate's front came away from his upper lip and the floor of his mouth stuck out under his lower lip
@@ -76,7 +76,7 @@ namespace
 		"Muzzle Lower Right", "Muzzle Jaw Left", "Muzzle Jaw Right", "Cheeck Side L", "Cheeck Side R" };
 	constexpr int kMouthRimN = static_cast<int>(sizeof(kMouthRim) / sizeof(kMouthRim[0]));
 	constexpr int kMouthNodes = 6 + kMouthRimN;
-	constexpr bool rigMouthBones(std::uint32_t nb) { return nb == 6 || nb == 8 || nb == 8 + kMouthRimN; }   // 0.4.6: DeepFit's own bones plus what a head profile adds
+	constexpr bool rigMouthBones(std::uint32_t nb) { return nb == 6 || nb == 8 || nb == 8 + kMouthRimN; }
 
 	// 0.5.4: the lips are mostly moved by DeepFit's bones, not its morphs - a beard following only the morphs stayed where
 	// the lips were pushed out of it (the moustache sank into the upper lip, the chin beard into the lower). Each lip bone
@@ -2383,8 +2383,12 @@ namespace
 			};
 			if (!onHead(si->bones[0]))
 				return;
-			for (std::uint32_t i = 2; i < nb; ++i) {
-				NiNode* want = r.mouthNodes[i - 2].get();
+			for (std::uint32_t i = 1; i < nb; ++i) {
+				// 0.5.8: its teeth (bone 1) ride with his upper lip - on his head bone they stayed put when the lip and snout
+				// moved and hung in the air; while hidden for a scene they stay on the hiding node
+				if (i == 1 && r.teethHideNode && si->bones[1] == r.teethHideNode.get())
+					continue;
+				NiNode* want = i == 1 ? r.mouthNodes[4].get() : r.mouthNodes[i - 2].get();
 				if (si->bones[i] == want)
 					continue;
 				r.mouthSlots.push_back({ NiPointer<BSGeometry>(geo), i, NiPointer<NiAVObject>(si->bones[i]) });
@@ -2702,6 +2706,11 @@ namespace
 					auto* b = si->bones[i];
 					if (!match || !b)
 						continue;
+					// 0.5.8: a rigged mouth's head slot is the roof of his mouth and its edge on his lips - it stays on his
+					// head. Hung on the teeth node it went down and back with "Teeth down / back" and the palate came away
+					// from his upper lip (the gap under the upper lip); its teeth have their own slot
+					if (i <= 1 && rigMouthBones(nb))
+						continue;   // (and its teeth follow his upper lip - rigMouth)
 					if (b == r.teethNode.get())
 						continue;   // still ours
 					const std::string_view bn(b->name.c_str() ? b->name.c_str() : "");
@@ -4062,8 +4071,8 @@ void DeepFit::OnFrame(float delta)
 				}
 				for (auto& h : r.mouthSlots) {   // 0.5.4
 					auto* si = h.geo ? h.geo->GetGeometryRuntimeData().skinInstance.get() : nullptr;
-					if (si && si->bones && si->skinData && h.idx < si->skinData->bones && h.orig && h.idx >= 2 && h.idx < 2 + kMouthNodes &&
-						si->bones[h.idx] == r.mouthNodes[h.idx - 2].get()) {
+					if (si && si->bones && si->skinData && h.idx < si->skinData->bones && h.orig && h.idx >= 1 && h.idx < 2 + kMouthNodes &&
+						si->bones[h.idx] == r.mouthNodes[h.idx == 1 ? 4 : h.idx - 2].get()) {
 						si->bones[h.idx] = h.orig.get();
 						si->boneWorldTransforms[h.idx] = &h.orig->world;
 					}
