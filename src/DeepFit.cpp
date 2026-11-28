@@ -76,7 +76,10 @@ namespace
 		"Muzzle Lower Right", "Muzzle Jaw Left", "Muzzle Jaw Right", "Cheeck Side L", "Cheeck Side R" };
 	constexpr int kMouthRimN = static_cast<int>(sizeof(kMouthRim) / sizeof(kMouthRim[0]));
 	constexpr int kMouthNodes = 6 + kMouthRimN;
-	constexpr bool rigMouthBones(std::uint32_t nb) { return nb == 6 || nb == 8 || nb == 8 + kMouthRimN; }
+	constexpr int  kTeethLowerSlot = 8 + kMouthRimN;   // 0.5.9: a 25-bone mouth's lower teeth (bone 24)
+	constexpr int  kThroatSlot0 = 9 + kMouthRimN;     // 0.5.9: a 30-bone mouth's throat bones (25-29)
+	constexpr int  kThroatN = 5;
+	constexpr bool rigMouthBones(std::uint32_t nb) { return nb == 6 || nb == 8 || nb == 8 + kMouthRimN || nb == 9 + kMouthRimN || nb == 9 + kMouthRimN + kThroatN; }
 
 	// 0.5.4: the lips are mostly moved by DeepFit's bones, not its morphs - a beard following only the morphs stayed where
 	// the lips were pushed out of it (the moustache sank into the upper lip, the chin beard into the lower). Each lip bone
@@ -230,6 +233,13 @@ namespace
 		// 0.5.4: DeepFit's mouths (six bones: head, teeth, three lower-jaw ones, tongue) - their lower gums and floor follow
 		// his lower jaw bones and the tongue is pushed down by the shaft; the mouth's own bones hang on these nodes of DeepFit's
 		NiPointer<NiNode>      mouthNodes[kMouthNodes];
+		// 0.5.9: the throat a 30-bone mouth carries on into his neck: its bones' rest centres and radii (head-bone space,
+		// read from the mouth's skin), where they are now (off their rest, and how much wider), and the shaft's points
+		NiPointer<NiNode>      throatNodes[kThroatN];
+		NiPoint3               throatC[kThroatN], throatOff[kThroatN];
+		float                  throatR[kThroatN]{}, throatK[kThroatN]{ 1, 1, 1, 1, 1 };
+		bool                   throatSet = false;
+		std::vector<NiPoint3>  shaftWorld;
 		// 0.5.5: a head that opens with a skeleton jaw bone (no lip bones): DeepFit's own lip markers and that bone
 		NiPointer<NiNode>      virtLips[2];
 		NiPointer<NiAVObject>  jawBone;
@@ -1248,6 +1258,12 @@ namespace
 			r.shapeAt = g_clock;
 		}
 
+		{   // 0.5.9: the shaft's points (world) for the throat
+			r.shaftWorld.clear();
+			r.shaftWorld.reserve(hs.size());
+			for (auto& q : hs)
+				r.shaftWorld.push_back(C + X * q.x + Y * q.y + Z * q.z);
+		}
 		float target[kMaxSpecs] = {};
 		// 0.1.4: is the shaft in his mouth at all (near the mouth centre, at the lips' depth)? Then every lip opens at least
 		// MinOpen and the corners spread at least MinCorner, even where no shaft point falls in that lip's own lane
@@ -1903,6 +1919,7 @@ namespace
 	{
 		auto& cfg = cfgOf(r);
 		r.full = false;
+		r.shaftWorld.clear();   // 0.5.9
 		r.depthPrev = -1.0f;
 		r.vel *= std::exp(-delta * 6.0f);
 		r.depthK *= std::exp(-delta * 4.0f);
@@ -2360,10 +2377,65 @@ namespace
 			const NiTransform& H = r.head->world;
 			const float        hs = H.scale > 1e-6f ? H.scale : 1.0f;
 			r.mouthNodes[3]->local = NiTransform();
-			r.mouthNodes[3]->local.translate = (H.rotate.Transpose() * (r.fz * -r.tongueCur + r.fy * r.tongueFwd)) * (1.0f / hs);
+			// 0.5.9: on top of where the middle of his lower jaw went (the tongue lies on the floor of his mouth - the
+			// tongue alone was pushed while the floor went with the jaw, and they went through each other)
+			r.mouthNodes[3]->local.translate = r.mouthNodes[1]->local.translate + (H.rotate.Transpose() * (r.fz * -r.tongueCur + r.fy * r.tongueFwd)) * (1.0f / hs);
 		}
 		for (auto& n : r.mouthNodes)
 			n->world = r.head->world * n->local;
+		// 0.5.9: the throat: each throat bone goes to the middle of the shaft where it passes that part of the throat, and
+		// widens round it; back to rest when nothing is there
+		for (auto& n : r.throatNodes)
+			if (!n || n->parent != headNode) {
+				n = NiPointer<NiNode>(NiNode::Create(0));
+				n->name = "DF Throat Rig";
+				n->local = NiTransform();
+				headNode->AttachChild(n.get(), true);
+			}
+		if (r.throatSet) {
+			const NiTransform& H = r.head->world;
+			const float        hsc = H.scale > 1e-6f ? H.scale : 1.0f;
+			std::vector<NiPoint3> pts;
+			pts.reserve(r.shaftWorld.size());
+			for (auto& p : r.shaftWorld)
+				pts.push_back(H.rotate.Transpose() * (p - H.translate) * (1.0f / hsc));
+			const float k = 1.0f - std::exp(-delta * 10.0f);
+			for (int q = 0; q < kThroatN; ++q) {
+				const NiPoint3 c = r.throatC[q];
+				NiPoint3       t = r.throatC[std::min(q + 1, kThroatN - 1)] - r.throatC[std::max(q - 1, 0)];
+				t = len(t) > 1e-4f ? norm(t) : NiPoint3(0, -1, 0);
+				NiPoint3 m;
+				int      cnt = 0;
+				for (auto& p : pts)
+					if (std::fabs(dot(p - c, t)) < 0.8f && len(p - c) < 12.0f) {
+						m += p;
+						++cnt;
+					}
+				NiPoint3 wantOff;
+				float    wantK = 1.0f;
+				if (cnt >= 12) {
+					m = m * (1.0f / static_cast<float>(cnt));
+					float rad = 0.0f;
+					for (auto& p : pts)
+						if (std::fabs(dot(p - c, t)) < 0.8f && len(p - c) < 12.0f) {
+							NiPoint3 d = p - m;
+							d = d - t * dot(d, t);
+							rad = std::max(rad, len(d));
+						}
+					wantOff = (m - c) - t * dot(m - c, t);
+					if (len(wantOff) > 8.0f)
+						wantOff = norm(wantOff) * 8.0f;
+					wantK = std::clamp((rad + 0.2f) / std::max(r.throatR[q], 0.1f), 1.0f, 3.0f);
+				}
+				r.throatOff[q] += (wantOff - r.throatOff[q]) * k;
+				r.throatK[q] += (wantK - r.throatK[q]) * k;
+				auto& n = r.throatNodes[q];
+				n->local = NiTransform();
+				n->local.translate = c + r.throatOff[q];
+				n->local.scale = r.throatR[q] * r.throatK[q];
+				n->world = H * n->local;
+			}
+		}
 		// hang the rigged mouths' bones on them (again after the face is rebuilt)
 		r.mouthScan -= delta;
 		if (r.mouthScan > 0.0f)
@@ -2384,11 +2456,31 @@ namespace
 			if (!onHead(si->bones[0]))
 				return;
 			for (std::uint32_t i = 1; i < nb; ++i) {
-				// 0.5.8: its teeth (bone 1) ride with his upper lip - on his head bone they stayed put when the lip and snout
-				// moved and hung in the air; while hidden for a scene they stay on the hiding node
-				if (i == 1 && r.teethHideNode && si->bones[1] == r.teethHideNode.get())
+				// 0.5.9: its teeth: the upper ones (bone 1) on his head - the snout's own morph moves them with it; on the
+				// upper lip (0.5.8) they followed the lip pressing down onto the shaft and hung in it. A 25-bone mouth's
+				// lower teeth (bone 24) go with the front of his lower jaw. While hidden for a scene both stay on the
+				// hiding node
+				const bool teethSlot = i == 1 || static_cast<int>(i) == kTeethLowerSlot;
+				if (teethSlot && r.teethHideNode && si->bones[i] == r.teethHideNode.get())
 					continue;
-				NiNode* want = i == 1 ? r.mouthNodes[4].get() : r.mouthNodes[i - 2].get();
+				const int ti = static_cast<int>(i) - kThroatSlot0;
+				if (ti >= 0 && ti < kThroatN && !r.throatSet) {   // its throat bones' rest (from its skin: centre, 1/radius)
+					const auto& s0 = si->skinData->boneData[0].skinToBone;
+					for (int q = 0; q < kThroatN; ++q) {
+						const auto& sq = si->skinData->boneData[kThroatSlot0 + q].skinToBone;
+						const float rq = sq.scale > 1e-6f ? 1.0f / sq.scale : 1.0f;
+						r.throatR[q] = rq;
+						r.throatC[q] = s0.translate - sq.translate * rq;
+						r.throatOff[q] = NiPoint3();
+						r.throatK[q] = 1.0f;
+					}
+					r.throatSet = true;
+					if (Config::get().debugLog)
+						logs::info("DeepFit: {} - its throat follows the shaft ({} bones, from {:.1f}/{:.1f}/{:.1f})", geo->name.c_str() ? geo->name.c_str() : "?", kThroatN,
+							r.throatC[0].x, r.throatC[0].y, r.throatC[0].z);
+				}
+				NiNode* want = (ti >= 0 && ti < kThroatN) ? r.throatNodes[ti].get() :
+				               i == 1 ? headNode : static_cast<int>(i) == kTeethLowerSlot ? r.mouthNodes[0].get() : r.mouthNodes[i - 2].get();
 				if (si->bones[i] == want)
 					continue;
 				r.mouthSlots.push_back({ NiPointer<BSGeometry>(geo), i, NiPointer<NiAVObject>(si->bones[i]) });
@@ -2570,7 +2662,7 @@ namespace
 					for (std::uint32_t i = 1; i < si->skinData->bones; ++i) {
 						if (si->bones[i] == r.teethHideNode.get())
 							continue;   // ours already
-						if (rig && i != 1)
+						if (rig && i != 1 && static_cast<int>(i) != kTeethLowerSlot)
 							continue;
 						if (!ours && !onHead(si->bones[i]))
 							continue;
@@ -2709,8 +2801,8 @@ namespace
 					// 0.5.8: a rigged mouth's head slot is the roof of his mouth and its edge on his lips - it stays on his
 					// head. Hung on the teeth node it went down and back with "Teeth down / back" and the palate came away
 					// from his upper lip (the gap under the upper lip); its teeth have their own slot
-					if (i <= 1 && rigMouthBones(nb))
-						continue;   // (and its teeth follow his upper lip - rigMouth)
+					if ((i <= 1 || static_cast<int>(i) == kTeethLowerSlot) && rigMouthBones(nb))
+						continue;   // (its teeth: rigMouth)
 					if (b == r.teethNode.get())
 						continue;   // still ours
 					const std::string_view bn(b->name.c_str() ? b->name.c_str() : "");
@@ -3509,6 +3601,27 @@ namespace
 		std::vector<NiPoint3> headPts(hb.rest.size());
 		for (std::size_t j = 0; j < hb.rest.size(); ++j)
 			headPts[j] = headInv * hb.rest[j];
+		// 0.5.8: which face points belong to his lower jaw (they move with the jaw-open morph): the main direction the
+		// morph moves things, and the points that move at least a quarter of the most along it
+		std::vector<bool> lowerFace;
+		if (!hb.morph[0].empty() && hb.morph[0].size() == hb.rest.size()) {
+			NiPoint3 dir;
+			float    mx = 0.0f;
+			for (auto& v : hb.morph[0])
+				mx = std::max(mx, len(v));
+			for (auto& v : hb.morph[0])
+				if (len(v) > 0.5f * mx)
+					dir += v;
+			if (mx > 1e-4f && len(dir) > 1e-6f) {
+				dir = norm(dir);
+				float top = 0.0f;
+				for (auto& v : hb.morph[0])
+					top = std::max(top, dot(v, dir));
+				lowerFace.resize(hb.rest.size());
+				for (std::size_t j = 0; j < hb.rest.size(); ++j)
+					lowerFace[j] = dot(hb.morph[0][j], dir) > 0.25f * top;
+			}
+		}
 		for (auto* hp : parts) {
 			auto* o = root->GetObjectByName(hp->formEditorID);
 			auto* g = o ? o->AsGeometry() : nullptr;
@@ -3544,21 +3657,49 @@ namespace
 			b.dist.assign(b.n, 1e9f);
 			for (std::uint32_t i = 0; i < b.n; ++i) {
 				const NiPoint3 p = bind * pts[i];
-				std::uint32_t  best[3] = { 0, 0, 0 };
-				float          bd[3] = { 1e30f, 1e30f, 1e30f };
+				// 0.5.8: the 6 nearest face points, then only those on one side of his mouth (the side most of them are
+				// on): a beard point at his mouth line took the upper and the lower lip half each and stayed in the
+				// middle when the mouth opened - a curtain of beard across the open mouth
+				constexpr int  K = 6;
+				std::uint32_t  cand[K] = {};
+				float          cd[K];
+				std::fill(std::begin(cd), std::end(cd), 1e30f);
 				for (std::uint32_t j = 0; j < headPts.size(); ++j) {
 					const NiPoint3 d = headPts[j] - p;
 					const float    q = d.x * d.x + d.y * d.y + d.z * d.z;
-					if (q >= bd[2])
+					if (q >= cd[K - 1])
 						continue;
-					int k = 2;
-					while (k > 0 && q < bd[k - 1]) {
-						bd[k] = bd[k - 1];
-						best[k] = best[k - 1];
+					int k = K - 1;
+					while (k > 0 && q < cd[k - 1]) {
+						cd[k] = cd[k - 1];
+						cand[k] = cand[k - 1];
 						--k;
 					}
-					bd[k] = q;
-					best[k] = j;
+					cd[k] = q;
+					cand[k] = j;
+				}
+				bool lowerSide = false;
+				if (!lowerFace.empty()) {
+					float vote = 0.0f;
+					for (int k = 0; k < K; ++k)
+						if (cd[k] < 1e29f)
+							vote += (lowerFace[cand[k]] ? 1.0f : -1.0f) / (std::sqrt(cd[k]) + 0.05f);
+					lowerSide = vote > 0.0f;
+				}
+				std::uint32_t best[3] = { cand[0], cand[0], cand[0] };
+				float         bd[3] = { cd[0], cd[0], cd[0] };
+				{
+					int got = 0;
+					for (int k = 0; k < K && got < 3; ++k)
+						if (cd[k] < 1e29f && (lowerFace.empty() || lowerFace[cand[k]] == lowerSide)) {
+							best[got] = cand[k];
+							bd[got] = cd[k];
+							++got;
+						}
+					for (int k = got; k < 3 && got > 0; ++k) {   // fewer than three on that side: repeat the nearest one
+						best[k] = best[0];
+						bd[k] = bd[0];
+					}
 				}
 				float tot = 0.0f, w[3];
 				for (int k = 0; k < 3; ++k) {
@@ -4071,8 +4212,9 @@ void DeepFit::OnFrame(float delta)
 				}
 				for (auto& h : r.mouthSlots) {   // 0.5.4
 					auto* si = h.geo ? h.geo->GetGeometryRuntimeData().skinInstance.get() : nullptr;
-					if (si && si->bones && si->skinData && h.idx < si->skinData->bones && h.orig && h.idx >= 1 && h.idx < 2 + kMouthNodes &&
-						si->bones[h.idx] == r.mouthNodes[h.idx == 1 ? 4 : h.idx - 2].get()) {
+					if (si && si->bones && si->skinData && h.idx < si->skinData->bones && h.orig && h.idx >= 2 && h.idx < static_cast<std::uint32_t>(kThroatSlot0 + kThroatN) &&
+						si->bones[h.idx] == (static_cast<int>(h.idx) >= kThroatSlot0 ? r.throatNodes[h.idx - kThroatSlot0].get() :
+						                         r.mouthNodes[static_cast<int>(h.idx) == kTeethLowerSlot ? 0 : h.idx - 2].get())) {
 						si->bones[h.idx] = h.orig.get();
 						si->boneWorldTransforms[h.idx] = &h.orig->world;
 					}
